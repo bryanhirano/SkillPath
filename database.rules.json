@@ -1,0 +1,29 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        "profile": {
+          ".write": false
+        },
+        "analyses": {
+          ".write": false,
+          ".indexOn": ["generatedAt"]
+        },
+        "progress": {
+          "$analysisId": {
+            ".write": "auth != null && auth.uid === $uid && root.child('users').child($uid).child('analyses').child($analysisId).exists()",
+            "$skillId": {
+              ".validate": "newData.isNumber() && newData.val() <= now"
+            }
+          }
+        },
+        "$other": {
+          ".write": false
+        }
+      }
+    }
+  }
+}
