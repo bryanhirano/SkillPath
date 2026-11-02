@@ -1,6 +1,13 @@
-# Python bytecode
-__pycache__/
+# Local Java installations
+components/oraclejdk-27/
 
-# Python virtual environment
+# Local dependencies
+node_modules/
 venv/
-*.local
+.venv/
+
+# Temporary files
+*-debug.log
+firebase-export/
+__pycache__/
+*.pyc

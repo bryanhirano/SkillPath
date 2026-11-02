@@ -1,21 +1,20 @@
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
-import App from './components/App'; // Make sure this path matches your folder structure!
-import { Provider } from "react-redux";
-import { BrowserRouter as Router } from "react-router-dom";
+import App from '../../components/App.jsx';
+import { Provider } from 'react-redux';
+import { BrowserRouter } from 'react-router-dom';
+import { store } from './store.jsx';
 
-// Import your perfectly fixed store
-import { store } from './store'; 
-
-console.log("VITE IS RUNNING MAIN.JSX - The store is:", store);
-
-const root = ReactDOM.createRoot(document.getElementById('root'));
+const root = ReactDOM.createRoot(
+  document.getElementById('root')
+);
 
 root.render(
-    <Provider store={store}>
-        <Router>
-            <App />
-        </Router>
-    </Provider>
+  <Provider store={store}>
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  </Provider>
 );

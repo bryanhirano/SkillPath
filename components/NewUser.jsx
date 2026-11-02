@@ -3,8 +3,8 @@ import { Link } from "react-router-dom";
 import {
   authErrorMessage,
   createAccount,
-  signInWithGoogle,
-} from "../backend/firebase";
+  signInWithGoogle
+} from "../skillpath-ai/src/backend/firebase.jsx";
  
 // Creating the account also signs the user in. The auth listener in
 // backend/firebase.js then updates Redux and App.js shows the dashboard.

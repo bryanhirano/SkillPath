@@ -1,6 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { _signOut } from "../backend/firebase"; // Adjust path if needed
-
+import { _signOut } from "../skillpath-ai/src/backend/firebase.jsx";
 const Toolbar = () => {
   const navigate = useNavigate();
 

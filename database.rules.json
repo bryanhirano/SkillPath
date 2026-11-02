@@ -1,3 +1,4 @@
+
 {
   "rules": {
     ".read": false,
@@ -19,6 +20,18 @@
               ".validate": "newData.isNumber() && newData.val() <= now"
             }
           }
+        },
+        "resumePath": {
+          ".write": "auth != null && auth.uid === $uid",
+          ".validate": "newData.isString() && newData.val().beginsWith('resumes/' + $uid + '/')"
+        },
+        "resumeFileName": {
+          ".write": "auth != null && auth.uid === $uid",
+          ".validate": "newData.isString()"
+        },
+        "resumeContentType": {
+          ".write": "auth != null && auth.uid === $uid",
+          ".validate": "newData.val() === 'application/pdf' || newData.val() === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'"
         },
         "$other": {
           ".write": false

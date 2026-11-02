@@ -4,8 +4,7 @@ import {
   authErrorMessage,
   signInUser,
   signInWithGoogle,
-} from "../backend/firebase";
- 
+} from "../skillpath-ai/src/backend/firebase.jsx"; 
 // After a successful sign-in, the auth listener in backend/firebase.js updates
 // Redux and App.js swaps these pages for the dashboard. No navigation needed here.
 const Login = () => {

@@ -1,97 +1,105 @@
-import '../App.css';
-import { Route, Routes, Navigate } from "react-router-dom";
-import 'bootstrap';
+
+import '../skillpath-ai/src/App.css';
+
+import { Route, Routes, Navigate } from 'react-router-dom';
 import 'bootstrap/dist/css/bootstrap.css';
 import { connect } from 'react-redux';
-import Login from './Login.jsx'
-import { handleInitialData } from '../actions/shared.jsx';
 import { useEffect } from 'react';
+
+import { library } from '@fortawesome/fontawesome-svg-core';
+import { faBars } from '@fortawesome/free-solid-svg-icons';
+
+import { onAuthStateChanged } from 'firebase/auth';
+
+// Application components
+import Login from './Login.jsx';
 import Loading from './Loading.jsx';
-import { library } from "@fortawesome/fontawesome-svg-core";
-import { faBars } from "@fortawesome/free-solid-svg-icons";
 import NewUser from './NewUser.jsx';
 import ResumeUpload from './ResumeUpload.jsx';
-import { onAuthStateChanged } from "firebase/auth";
-import { setLoaded } from '../actions/loaded.jsx';
-import { setAuthedUser } from '../actions/authedUsers.jsx';
-import { auth } from '../backend/firebase.jsx';
 import Toolbar from './Toolbar.jsx';
+import BackendTest from '../skillpath-ai/src/backend/components/BackendTest.jsx';
+// Redux actions
+import { handleInitialData } from '../skillpath-ai/src/actions/shared.jsx';
+import { setLoaded } from '../skillpath-ai/src/actions/loaded.jsx';
+import { setAuthedUser } from '../skillpath-ai/src/actions/authedUsers.jsx';
 
-
+// Firebase authentication
+import { auth } from '../skillpath-ai/src/backend/firebase.jsx';
+// FontAwesome configuration
 library.add(faBars);
 
-// authedUser: null when logged out, the Firebase uid when logged in.
-// loaded:     null until Firebase reports the login state; then
-//             true  = nothing to wait for (logged out, or user data loaded)
-//             false = logged in, user data still loading
 function App({ authedUser, loaded, dispatch }) {
 
+  // Monitor Firebase authentication
   useEffect(() => {
-    // We removed const auth = getAuth() from here because it is now imported from firebase.jsx!
-    
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         dispatch(setAuthedUser(user.uid));
-        dispatch(setLoaded(false)); // Start the loading screen while data fetches
+        dispatch(setLoaded(false));
       } else {
         dispatch(setAuthedUser(null));
-        dispatch(setLoaded(true));  // Stop loading so the login screen appears
+        dispatch(setLoaded(true));
       }
     });
 
     return () => unsubscribe();
   }, [dispatch]);
 
-
-  // 2. Fetch the user's data from the database once they are logged in
+  // Retrieve user information after login
   useEffect(() => {
     if (authedUser) {
       dispatch(handleInitialData(authedUser));
     }
   }, [authedUser, dispatch]);
 
-
-  // Firebase hasn't said yet whether someone is logged in
+  // Display loading screen during initialization
   if (authedUser === null && !loaded) {
-    return (
-      <Routes>
-      <Route path='/login' element={<Login />} />
-      <Route path='/new' element={<NewUser />} />
-      <Route path="*" element={<Navigate to="/login" replace />} />
-    </Routes>)
+    return <Loading />;
   }
 
-  // Logged out: only the login, sign-up and reset pages are reachable
+  // Routes for unauthenticated users
   if (authedUser === null) {
     return (
       <div className="App">
-    <Routes>
-      <Route path='/login' element={<Login />} />
-      <Route path='/new' element={<NewUser />} />
-      <Route path="*" element={<Navigate to="/login" replace />} />
-    </Routes>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/new" element={<NewUser />} />
+          <Route
+            path="*"
+            element={<Navigate to="/login" replace />}
+          />
+        </Routes>
       </div>
-    )
+    );
   }
 
-  // Logged in
+  // Routes for authenticated users
   return (
     <div className="App">
-      <Toolbar></Toolbar>
+      <Toolbar />
+
+      {/* Backend connection test */}
+      <BackendTest />
+
       <Routes>
-        <Route path='/resume' element={<ResumeUpload />} />
-        <Route path="*" element={<Navigate to="/resume" replace />} />
+        <Route
+          path="/resume"
+          element={<ResumeUpload />}
+        />
+
+        <Route
+          path="*"
+          element={<Navigate to="/resume" replace />}
+        />
       </Routes>
-
     </div>
-  )
+  );
 }
 
-const mapStateToProps = ({ authedUser, loaded }) => {
-  return {
-    authedUser,
-    loaded,
-  }
-}
+// Connect Redux state to the application
+const mapStateToProps = ({ authedUser, loaded }) => ({
+  authedUser,
+  loaded,
+});
 
 export default connect(mapStateToProps)(App);
