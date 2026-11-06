@@ -2,9 +2,9 @@ name: Pylint
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   lint:
@@ -14,22 +14,20 @@ jobs:
         python-version: ["3.12", "3.13", "3.14", "3.15"]
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pylint
-        python -m pip install -r functions/requirements.txt
-        
-    - name: Analysing the code with pylint
-      run: |
-        pylint $(git ls-files '*.py')
-      continue-on-error: true
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pylint
+          python -m pip install -r functions/requirements.txt
 
+      - name: Analysing the code with pylint
+        run: |
+          pylint $(git ls-files '*.py')
