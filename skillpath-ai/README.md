@@ -1,5 +1,19 @@
 # React + Vite
 
+## Resume upload and text extraction
+
+Signed-in users can save resume text or upload a PDF/DOCX file smaller than 5 MB.
+Uploaded files are stored privately under the user's `resumes/` path. The
+`extract_resume_text` callable reads that user's uploaded file with the Firebase
+Admin SDK and returns extracted text (PDFs are limited to 50 pages; extracted
+text is limited to 100,000 characters).
+
+Deploy the Cloud Function and the Realtime Database and Storage rules together:
+
+```sh
+firebase deploy --only functions,database,storage
+```
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

@@ -20,6 +20,22 @@
 						}
 					}
 				},
+				"resumePath": {
+					".write": "auth != null && auth.uid === $uid",
+					".validate": "newData.isString() && newData.val().beginsWith('resumes/' + $uid + '/') && newData.val().length <= 512"
+				},
+				"resumeFileName": {
+					".write": "auth != null && auth.uid === $uid",
+					".validate": "newData.isString() && newData.val().length <= 255"
+				},
+				"resumeContentType": {
+					".write": "auth != null && auth.uid === $uid",
+					".validate": "newData.val() === 'application/pdf' || newData.val() === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'"
+				},
+				"resumeText": {
+					".write": "auth != null && auth.uid === $uid",
+					".validate": "newData.isString() && newData.val().length <= 100000"
+				},
 				"$other": {
 					".write": false
 				}
