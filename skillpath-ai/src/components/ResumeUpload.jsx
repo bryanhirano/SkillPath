@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useSelector } from "react-redux";
 import {
+	analyzeResume,
 	extractResumeText,
 	saveResumeText,
 	uploadResume,
@@ -15,10 +16,13 @@ const ResumeUpload = () => {
 	const [text, setText] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [extracting, setExtracting] = useState(false);
+	const [analyzing, setAnalyzing] = useState(false);
 	const [message, setMessage] = useState("");
 	const [error, setError] = useState("");
 	const [extractedText, setExtractedText] = useState("");
 	const [extractedFileName, setExtractedFileName] = useState("");
+	const [analysis, setAnalysis] = useState(null);
+	const isBusy = busy || extracting || analyzing;
 
 	const handleFileChange = (event) => {
 		const selected = event.target.files?.[0];
@@ -31,6 +35,7 @@ const ResumeUpload = () => {
 			setMessage("");
 			setExtractedText("");
 			setExtractedFileName("");
+			setAnalysis(null);
 			return;
 		}
 
@@ -71,9 +76,11 @@ const ResumeUpload = () => {
 				setMessage("Resume uploaded successfully!");
 				setExtractedText("");
 				setExtractedFileName("");
+				setAnalysis(null);
 			} else {
 				await saveResumeText(uid, text);
 				setMessage("Resume text saved successfully!");
+				setAnalysis(null);
 			}
 		} catch (uploadError) {
 			setError(
@@ -91,6 +98,7 @@ const ResumeUpload = () => {
 		setMessage("");
 		setExtractedText("");
 		setExtractedFileName("");
+		setAnalysis(null);
 
 		if (!uid) {
 			setError("Please sign in first.");
@@ -114,7 +122,31 @@ const ResumeUpload = () => {
 		}
 	};
 
-	const isBusy = busy || extracting;
+	const handleAnalyze = async () => {
+		setError("");
+		setMessage("");
+		setAnalysis(null);
+
+		if (!uid) {
+			setError("Please sign in first.");
+			return;
+		}
+
+		setAnalyzing(true);
+		try {
+			const result = await analyzeResume();
+			if (result.status !== "success") {
+				throw new Error("Resume analysis was unsuccessful.");
+			}
+
+			setAnalysis(result);
+			setMessage("Resume analysis completed successfully!");
+		} catch (analysisError) {
+			setError(`Failed to analyze resume: ${analysisError.message}`);
+		} finally {
+			setAnalyzing(false);
+		}
+	};
 
 	return (
 		<div className="container mt-4 mb-5">
@@ -245,6 +277,86 @@ const ResumeUpload = () => {
 							<p className="text-muted mt-2">
 								Characters extracted: {extractedText.length.toLocaleString()}
 							</p>
+						</div>
+					)}
+
+					<hr className="my-4" />
+					<h5>Resume Analysis</h5>
+					<p className="text-muted">
+						Identify skills, education, experience, and occupations from your
+						most recently uploaded resume.
+					</p>
+					<button
+						type="button"
+						className="btn btn-primary w-100"
+						onClick={handleAnalyze}
+						disabled={isBusy}
+					>
+						{analyzing ? "Analyzing Resume..." : "Analyze Resume"}
+					</button>
+
+					{analysis && (
+						<div className="mt-4">
+							<h5>Analysis Results</h5>
+							<p>
+								<strong>File:</strong> {analysis.fileName}
+							</p>
+							<p>
+								<strong>Analysis method:</strong>{" "}
+								{analysis.analysisType === "rule-based"
+									? "Rule-based prototype"
+									: analysis.analysisType || "Unknown"}
+							</p>
+							<p>
+								<strong>Experience:</strong>{" "}
+								{analysis.yearsExperience != null
+									? `${analysis.yearsExperience} years mentioned`
+									: "Not identified"}
+							</p>
+
+							<h6>Identified Skills</h6>
+							{analysis.skills?.length > 0 ? (
+								<div className="mb-3">
+									{analysis.skills.map((skill) => (
+										<span key={skill} className="badge bg-secondary me-2 mb-2">
+											{skill}
+										</span>
+									))}
+								</div>
+							) : (
+								<p className="text-muted">
+									No skills matched the current catalog.
+								</p>
+							)}
+
+							<h6>Education Mentioned</h6>
+							{analysis.education?.length > 0 ? (
+								<ul>
+									{analysis.education.map((degree) => (
+										<li key={degree}>{degree}</li>
+									))}
+								</ul>
+							) : (
+								<p className="text-muted">No degree keywords identified.</p>
+							)}
+
+							<h6>Occupations Mentioned</h6>
+							{analysis.possibleOccupations?.length > 0 ? (
+								<ul>
+									{analysis.possibleOccupations.map((occupation) => (
+										<li key={occupation}>{occupation}</li>
+									))}
+								</ul>
+							) : (
+								<p className="text-muted">
+									No occupations matched the current catalog.
+								</p>
+							)}
+
+							<div className="alert alert-info mt-3">
+								This is preliminary keyword-based analysis, not an AI-generated
+								career recommendation. Review the results for accuracy.
+							</div>
 						</div>
 					)}
 				</div>

@@ -2,6 +2,7 @@
 
 import io
 import logging
+import re
 
 from docx import Document
 from firebase_admin import db, initialize_app, storage
@@ -145,33 +146,19 @@ def _extract_document_text(file_bytes, file_name, content_type):
     return text
 
 
-@https_fn.on_call()
-def extract_resume_text(request: https_fn.CallableRequest):
-    """Return extracted text from the authenticated caller's uploaded resume.
-
-    The callable reads the caller's resume metadata from Realtime Database,
-    verifies that the Storage path belongs to that caller, then downloads and
-    extracts the document.
+def _load_resume_text(uid):
+    """Load and extract the authenticated user's uploaded resume.
 
     Args:
-        request: The Firebase callable request, including authentication data.
+        uid: Firebase Authentication UID of the resume owner.
 
     Returns:
-        A mapping with success status, original file name, extracted text, and
-        character count.
+        A tuple containing the original file name and extracted text.
 
     Raises:
-        https_fn.HttpsError: If the caller is unauthenticated, resume metadata
-            is missing or invalid, or the document cannot be downloaded or
-            extracted.
+        https_fn.HttpsError: If metadata is missing or invalid, the file is
+            unavailable, or its contents cannot be extracted.
     """
-    if request.auth is None:
-        raise https_fn.HttpsError(
-            code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
-            message="Please sign in first.",
-        )
-
-    uid = request.auth.uid
     try:
         user_data = db.reference(f"users/{uid}").get() or {}
     except Exception as error:
@@ -237,9 +224,149 @@ def extract_resume_text(request: https_fn.CallableRequest):
             message="The resume contains no extractable text.",
         )
 
+    return file_name, extracted_text
+
+
+@https_fn.on_call()
+def extract_resume_text(request: https_fn.CallableRequest):
+    """Return extracted text from the authenticated caller's uploaded resume.
+
+    Args:
+        request: The Firebase callable request, including authentication data.
+
+    Returns:
+        A mapping with success status, original file name, extracted text, and
+        character count.
+
+    Raises:
+        https_fn.HttpsError: If the caller is unauthenticated or the resume
+            metadata, file, or extracted text is invalid.
+    """
+    if request.auth is None:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
+            message="Please sign in first.",
+        )
+
+    file_name, extracted_text = _load_resume_text(request.auth.uid)
     return {
         "status": "success",
         "fileName": file_name,
         "text": extracted_text,
         "characterCount": len(extracted_text),
+    }
+
+
+@https_fn.on_call()
+def analyze_resume(request: https_fn.CallableRequest):
+    """Identify resume skills, education, experience, and occupations.
+
+    Analysis uses a rule-based keyword catalog and is intended as a
+    preliminary aid, not an AI-generated career recommendation.
+
+    Args:
+        request: The Firebase callable request, including authentication data.
+
+    Returns:
+        A mapping with the file name, identified skills, education, years of
+        experience, possible occupations, and skill count.
+
+    Raises:
+        https_fn.HttpsError: If the caller is unauthenticated or the resume
+            metadata, file, or extracted text is invalid.
+    """
+    if request.auth is None:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
+            message="Please sign in first.",
+        )
+
+    file_name, resume_text = _load_resume_text(request.auth.uid)
+    skills_catalog = {
+        "Bookkeeping": ["bookkeeping", "bookkeeper"],
+        "Accounting": ["accounting"],
+        "QuickBooks": ["quickbooks"],
+        "Microsoft 365": ["microsoft 365", "office 365"],
+        "Microsoft Excel": ["excel", "spreadsheets"],
+        "Financial Analysis": ["financial analysis", "financial data analysis"],
+        "Data Entry": ["data entry"],
+        "Administrative Support": [
+            "administrative assistant",
+            "administrative skills",
+        ],
+        "Payroll": ["payroll"],
+        "Budgeting": ["budgeting", "budget management"],
+        "Project Management": ["project management"],
+        "Customer Service": ["customer service"],
+        "Python": ["python"],
+        "JavaScript": ["javascript"],
+        "SQL": ["sql"],
+        "Cybersecurity": ["cybersecurity", "cyber security"],
+        "Data Analysis": ["data analysis", "data analytics"],
+        "Leadership": ["leadership"],
+        "Training": ["trained", "training"],
+        "Communication": ["communication"],
+        "Spanish": ["spanish"],
+    }
+
+    def contains_keyword(keyword):
+        """Return whether a case-insensitive whole-word match exists."""
+        return re.search(
+            r"(?<!\w)" + re.escape(keyword) + r"(?!\w)",
+            resume_text,
+            flags=re.IGNORECASE,
+        )
+
+    identified_skills = [
+        skill
+        for skill, keywords in skills_catalog.items()
+        if any(contains_keyword(keyword) for keyword in keywords)
+    ]
+
+    education_patterns = {
+        "Doctorate": r"\b(ph\.?d\.?|doctorate|doctoral degree)\b",
+        "Master's Degree": r"\b(m\.?b\.?a\.?|master'?s|m\.?s\.?|m\.?a\.?)\b",
+        "Bachelor's Degree": r"\b(b\.?s\.?|b\.?a\.?|bachelor'?s)\b",
+        "Associate Degree": r"\b(a\.?s\.?|a\.?a\.?|associate'?s)\b",
+    }
+    education = [
+        degree
+        for degree, pattern in education_patterns.items()
+        if re.search(pattern, resume_text, re.IGNORECASE)
+    ]
+
+    experience_match = re.search(
+        r"\b(\d{1,2})\s*\+?\s*years?\s+(?:of\s+)?experience\b",
+        resume_text,
+        re.IGNORECASE,
+    )
+    years_experience = (
+        int(experience_match.group(1)) if experience_match else None
+    )
+
+    occupation_keywords = {
+        "Bookkeeper": ["bookkeeper", "bookkeeping"],
+        "Accountant": ["accountant"],
+        "Administrative Assistant": ["administrative assistant"],
+        "Financial Analyst": ["financial analyst"],
+        "Software Developer": ["software developer"],
+        "Project Manager": ["project manager"],
+        "Data Analyst": ["data analyst"],
+        "Cybersecurity Analyst": ["cybersecurity analyst"],
+    }
+    possible_occupations = [
+        occupation
+        for occupation, keywords in occupation_keywords.items()
+        if any(contains_keyword(keyword) for keyword in keywords)
+    ]
+
+    return {
+        "status": "success",
+        "analysisType": "rule-based",
+        "fileName": file_name,
+        "skills": identified_skills,
+        "education": education,
+        "yearsExperience": years_experience,
+        "possibleOccupations": possible_occupations,
+        "skillsCount": len(identified_skills),
     }

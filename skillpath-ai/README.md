@@ -1,12 +1,15 @@
 # React + Vite
 
-## Resume upload and text extraction
+## Resume upload, extraction, and analysis
 
 Signed-in users can save resume text or upload a PDF/DOCX file smaller than 5 MB.
 Uploaded files are stored privately under the user's `resumes/` path. The
 `extract_resume_text` callable reads that user's uploaded file with the Firebase
 Admin SDK and returns extracted text (PDFs are limited to 50 pages; extracted
 text is limited to 100,000 characters).
+The `analyze_resume` callable identifies skills, education, experience, and
+possible occupations from an uploaded file using a preliminary keyword-based
+rule set; it does not generate AI recommendations.
 
 Deploy the Cloud Function and the Realtime Database and Storage rules together:
 

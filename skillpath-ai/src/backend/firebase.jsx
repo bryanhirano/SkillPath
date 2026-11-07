@@ -280,3 +280,15 @@ export async function extractResumeText() {
 	const result = await callable({});
 	return result.data;
 }
+
+export async function analyzeResume() {
+	const user = auth.currentUser;
+	if (!user) {
+		throw new Error("Please sign in first.");
+	}
+
+	await user.getIdToken();
+	const callable = httpsCallable(functions, "analyze_resume");
+	const result = await callable({});
+	return result.data;
+}
