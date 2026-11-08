@@ -197,7 +197,6 @@ export async function uploadResume(uid, file) {
 		throw new Error("Resume must be smaller than 5 MB.");
 	}
 
-
 	const filePath = `resume/${uid}/`;
 	const storageRef = storageRefs(storage, filePath);
 	const metadata = {

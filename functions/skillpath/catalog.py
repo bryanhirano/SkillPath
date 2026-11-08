@@ -26,6 +26,8 @@ MIN_LEVEL, MAX_LEVEL = 0, 5
 
 @dataclass(frozen=True)
 class Skill:
+    """A normalized skill and its learning metadata."""
+
     id: str
     name: str
     category: str
@@ -36,6 +38,8 @@ class Skill:
 
 @dataclass(frozen=True)
 class Requirement:
+    """The proficiency level and importance a role assigns to a skill."""
+
     skill_id: str
     level: int
     importance: int
@@ -43,6 +47,8 @@ class Requirement:
 
 @dataclass(frozen=True)
 class Role:
+    """A target occupation and its required skills."""
+
     id: str
     title: str
     onet_code: str | None
@@ -51,7 +57,9 @@ class Role:
 
 
 @dataclass(frozen=True)
-class Resource:
+class Resource:  # pylint: disable=too-many-instance-attributes
+    """A learning resource and the skills and levels it covers."""
+
     id: str
     title: str
     provider: str
@@ -66,6 +74,8 @@ class Resource:
 
 @dataclass
 class Catalog:
+    """In-memory skills, roles, resources, and precomputed skill indexes."""
+
     categories: dict[str, str]
     skills: dict[str, Skill]
     roles: dict[str, Role]
@@ -74,6 +84,7 @@ class Catalog:
     _alias_pattern: re.Pattern | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
+        """Build lookup indexes from each skill's name and aliases."""
         for skill in self.skills.values():
             for alias in (skill.name, *skill.aliases):
                 self._alias_index.setdefault(normalize_text(alias), skill.id)
@@ -85,23 +96,33 @@ class Catalog:
 
     @property
     def alias_index(self) -> dict[str, str]:
+        """Return the normalized alias-to-skill index."""
         return self._alias_index
 
     @property
     def alias_pattern(self) -> re.Pattern:
+        """Return the compiled pattern that matches catalog aliases."""
         assert self._alias_pattern is not None
         return self._alias_pattern
 
     def resolve_alias(self, text: str) -> str | None:
+        """Resolve an exact normalized alias to its skill identifier."""
         return self._alias_index.get(normalize_text(text))
 
     def public_skills(self) -> list[dict]:
+        """Return skills in the public API representation."""
         return [
-            {"id": s.id, "name": s.name, "category": s.category, "prerequisites": list(s.prerequisites)}
+            {
+                "id": s.id,
+                "name": s.name,
+                "category": s.category,
+                "prerequisites": list(s.prerequisites),
+            }
             for s in self.skills.values()
         ]
 
     def public_roles(self) -> list[dict]:
+        """Return roles and their requirements in the public API representation."""
         return [
             {
                 "id": r.id,
@@ -117,6 +138,7 @@ class Catalog:
         ]
 
     def to_public(self) -> dict:
+        """Return the catalog data exposed to clients."""
         return {
             "categories": self.categories,
             "levels": LEVEL_LABELS,
@@ -124,18 +146,20 @@ class Catalog:
             "roles": self.public_roles(),
         }
 
-
 def normalize_text(text: str) -> str:
+    """Normalize text for case- and whitespace-insensitive matching."""
     return re.sub(r"\s+", " ", text.strip().lower())
 
 
 def _load_json(name: str) -> dict:
+    """Load a catalog JSON document from the package data directory."""
     with open(DATA_DIR / name, encoding="utf-8") as fh:
         return json.load(fh)
 
 
 @lru_cache(maxsize=1)
 def load_catalog() -> Catalog:
+    """Load, construct, validate, and cache the skill catalog."""
     skills_doc = _load_json("skills.json")
     roles_doc = _load_json("roles.json")
     resources_doc = _load_json("resources.json")

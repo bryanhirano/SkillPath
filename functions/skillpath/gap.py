@@ -17,6 +17,8 @@ class InputError(ValueError):
 
 @dataclass
 class TargetProfile:
+    """A selected catalog role or custom job-description target."""
+
     id: str
     title: str
     onet_code: str | None
@@ -25,6 +27,7 @@ class TargetProfile:
     custom: bool = False
 
     def to_dict(self) -> dict:
+        """Return the target metadata exposed to clients."""
         return {
             "id": self.id,
             "title": self.title,
@@ -54,7 +57,10 @@ def sanitize_levels(raw, catalog: Catalog) -> dict[str, int]:
     return levels
 
 
-def resolve_target(target: dict, catalog: Catalog, tagger: SpanTagger | None = None) -> TargetProfile:
+def resolve_target(
+    target: dict, catalog: Catalog, tagger: SpanTagger | None = None
+) -> TargetProfile:
+    """Resolve a role selection or build a target from a job description."""
     if not isinstance(target, dict):
         raise InputError("Choose a target role or paste a job description.")
     role_id = target.get("roleId")
@@ -62,15 +68,25 @@ def resolve_target(target: dict, catalog: Catalog, tagger: SpanTagger | None = N
         role = catalog.roles.get(role_id)
         if not role:
             raise InputError(f"Unknown role: {role_id}")
-        return TargetProfile(role.id, role.title, role.onet_code, role.onet_title, list(role.requirements))
+        return TargetProfile(
+            role.id,
+            role.title,
+            role.onet_code,
+            role.onet_title,
+            list(role.requirements),
+        )
 
     jd = (target.get("jobDescription") or "").strip()
     if len(jd) < 40:
-        raise InputError("Paste the full job description (at least a few sentences) or choose a role.")
+        raise InputError(
+            "Paste the full job description (at least a few sentences) "
+            "or choose a role."
+        )
     reqs = requirements_from_job_description(jd[:20_000], catalog, tagger)
     if len(reqs) < 2:
         raise InputError(
-            "We couldn't find enough recognizable skills in that job description. Choose a role from the list instead."
+            "We couldn't find enough recognizable skills in that job description. "
+            "Choose a role from the list instead."
         )
     title = (target.get("title") or "Custom target role").strip()[:80]
     return TargetProfile(
@@ -95,6 +111,7 @@ def readiness(levels: dict[str, int], requirements: list[Requirement]) -> float:
 def analyze_gaps(
     levels: dict[str, int], target: TargetProfile, catalog: Catalog, interests: list[str]
 ) -> dict:
+    """Compare current skill levels with target requirements."""
     gaps, strengths = [], []
     for q in target.requirements:
         skill = catalog.skills[q.skill_id]
@@ -121,7 +138,12 @@ def analyze_gaps(
     strengths.sort(key=lambda r: (-r["importance"], r["name"]))
     required_ids = {q.skill_id for q in target.requirements}
     transferable = [
-        {"skillId": sid, "name": catalog.skills[sid].name, "level": lvl, "levelLabel": LEVEL_LABELS[lvl]}
+        {
+            "skillId": sid,
+            "name": catalog.skills[sid].name,
+            "level": lvl,
+            "levelLabel": LEVEL_LABELS[lvl],
+        }
         for sid, lvl in sorted(levels.items(), key=lambda kv: -kv[1])
         if sid not in required_ids and lvl >= 3
     ]

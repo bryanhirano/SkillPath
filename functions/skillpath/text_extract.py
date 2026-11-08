@@ -15,10 +15,11 @@ SUPPORTED_TYPES = {
 
 
 class UnsupportedFileError(ValueError):
-    pass
+    """Raised when an uploaded file cannot be processed as a resume."""
 
 
 def detect_kind(filename: str, content_type: str | None) -> str:
+    """Determine the supported file kind from its MIME type or extension."""
     if content_type in SUPPORTED_TYPES:
         return SUPPORTED_TYPES[content_type]
     lower = filename.lower()
@@ -29,6 +30,7 @@ def detect_kind(filename: str, content_type: str | None) -> str:
 
 
 def extract_text(data: bytes, filename: str, content_type: str | None = None) -> str:
+    """Extract and clean text from a supported resume file."""
     if len(data) > MAX_BYTES:
         raise UnsupportedFileError("Resume files must be 5 MB or smaller.")
     kind = detect_kind(filename, content_type)
@@ -42,6 +44,7 @@ def extract_text(data: bytes, filename: str, content_type: str | None = None) ->
 
 
 def clean_text(text: str) -> str:
+    """Normalize whitespace and cap text length before further processing."""
     text = text.replace("\x00", " ")
     text = re.sub(r"[ \t ]+", " ", text)
     text = re.sub(r"\n\s*\n+", "\n\n", text)
@@ -49,20 +52,21 @@ def clean_text(text: str) -> str:
 
 
 def _pdf_text(data: bytes) -> str:
-    from pypdf import PdfReader
+    from pypdf import PdfReader  # pylint: disable=import-outside-toplevel
 
     reader = PdfReader(io.BytesIO(data))
     pages = [(page.extract_text() or "") for page in reader.pages[:15]]
     text = "\n".join(pages)
     if not text.strip():
         raise UnsupportedFileError(
-            "This PDF has no selectable text (it may be a scan). Upload a text-based PDF or paste your resume."
+            "This PDF has no selectable text (it may be a scan). "
+            "Upload a text-based PDF or paste your resume."
         )
     return text
 
 
 def _docx_text(data: bytes) -> str:
-    from docx import Document
+    from docx import Document  # pylint: disable=import-outside-toplevel
 
     doc = Document(io.BytesIO(data))
     parts = [p.text for p in doc.paragraphs]

@@ -33,6 +33,8 @@ PROJECT_CONTEXT = {
 
 @dataclass
 class Preferences:
+    """Validated study preferences used to tailor a learning pathway."""
+
     hours_per_week: float = 6
     pace: str = "steady"
     formats: list[str] = field(default_factory=list)
@@ -41,6 +43,7 @@ class Preferences:
 
     @classmethod
     def from_dict(cls, raw: dict | None, categories: dict[str, str]) -> "Preferences":
+        """Validate and normalize client-supplied study preferences."""
         raw = raw or {}
         try:
             hours = float(raw.get("hoursPerWeek", 6))
@@ -62,6 +65,8 @@ class Preferences:
 
 @dataclass
 class Node:
+    """A skill-level transition in the prerequisite-aware learning plan."""
+
     skill_id: str
     from_level: int
     to_level: int
@@ -72,14 +77,17 @@ class Node:
 
 
 def _lower_first(label: str) -> str:
+    """Lowercase the first character of a display label."""
     return label[:1].lower() + label[1:]
 
 
 def hours_to_level(hours_per_level: float, from_level: int, to_level: int) -> float:
+    """Estimate study hours to advance between two proficiency levels."""
     return hours_per_level * sum(LEVEL_COST[lvl] for lvl in range(from_level + 1, to_level + 1))
 
 
 def _plan_nodes(levels: dict[str, int], target: TargetProfile, catalog: Catalog) -> dict[str, Node]:
+    """Create missing target skills and their unmet prerequisites."""
     nodes: dict[str, Node] = {}
     for q in target.requirements:
         cur = levels.get(q.skill_id, 0)
@@ -105,6 +113,7 @@ def _plan_nodes(levels: dict[str, int], target: TargetProfile, catalog: Catalog)
 
 
 def _descendants(nodes: dict[str, Node]) -> dict[str, set[str]]:
+    """Map each skill to all later plan steps that depend on it."""
     children: dict[str, set[str]] = {sid: set() for sid in nodes}
     for sid, n in nodes.items():
         for d in n.deps:
@@ -122,7 +131,10 @@ def _descendants(nodes: dict[str, Node]) -> dict[str, set[str]]:
     return {sid: walk(sid) for sid in nodes}
 
 
-def _order(nodes: dict[str, Node], catalog: Catalog, prefs: Preferences) -> tuple[list[str], dict[str, set[str]]]:
+def _order(
+    nodes: dict[str, Node], catalog: Catalog, prefs: Preferences
+) -> tuple[list[str], dict[str, set[str]]]:
+    """Order skills by dependency, then by priority among ready steps."""
     desc = _descendants(nodes)
     for sid, n in nodes.items():
         interest = 1.25 if catalog.skills[sid].category in prefs.interests else 1.0
@@ -130,7 +142,11 @@ def _order(nodes: dict[str, Node], catalog: Catalog, prefs: Preferences) -> tupl
 
     # Kahn's algorithm; among steps that are ready, take the highest priority first.
     indegree = {sid: len(n.deps) for sid, n in nodes.items()}
-    ready = [(-n.priority, catalog.skills[sid].name, sid) for sid, n in nodes.items() if indegree[sid] == 0]
+    ready = [
+        (-n.priority, catalog.skills[sid].name, sid)
+        for sid, n in nodes.items()
+        if indegree[sid] == 0
+    ]
     heapq.heapify(ready)
     order: list[str] = []
     while ready:
@@ -146,7 +162,14 @@ def _order(nodes: dict[str, Node], catalog: Catalog, prefs: Preferences) -> tupl
     return order, desc
 
 
-def pick_resources(skill_id: str, from_level: int, to_level: int, catalog: Catalog, prefs: Preferences) -> list[dict]:
+def pick_resources(
+    skill_id: str,
+    from_level: int,
+    to_level: int,
+    catalog: Catalog,
+    prefs: Preferences,
+) -> list[dict]:
+    """Select the most relevant resources for the requested skill levels."""
     span = set(range(from_level + 1, to_level + 1))
     scored: list[tuple[float, Resource]] = []
     for r in catalog.resources:
@@ -176,14 +199,21 @@ def pick_resources(skill_id: str, from_level: int, to_level: int, catalog: Catal
 
 
 def practice_project(skill_id: str, to_level: int, hours: float, catalog: Catalog) -> dict:
+    """Create a practice project appropriate to the target skill level."""
     skill = catalog.skills[skill_id]
     ctx = PROJECT_CONTEXT.get(skill.category, "a small project")
     if to_level <= 2:
         text = f"Practice: use {skill.name} in {ctx}, following a tutorial end to end."
     elif to_level == 3:
-        text = f"Project: apply {skill.name} on your own in {ctx}, then ask a colleague to review it."
+        text = (
+            f"Project: apply {skill.name} on your own in {ctx}, "
+            "then ask a colleague to review it."
+        )
     else:
-        text = f"Stretch: lead {skill.name} work in {ctx} at work, and share what you learned with your team."
+        text = (
+            f"Stretch: lead {skill.name} work in {ctx} at work, "
+            "and share what you learned with your team."
+        )
     return {
         "id": f"project-{skill_id}-{to_level}",
         "title": text,
@@ -195,7 +225,11 @@ def practice_project(skill_id: str, to_level: int, hours: float, catalog: Catalo
     }
 
 
-def build_pathway(levels: dict[str, int], target: TargetProfile, catalog: Catalog, prefs: Preferences) -> dict:
+# pylint: disable=too-many-locals
+def build_pathway(
+    levels: dict[str, int], target: TargetProfile, catalog: Catalog, prefs: Preferences
+) -> dict:
+    """Build ordered learning steps, milestones, and readiness projections."""
     nodes = _plan_nodes(levels, target, catalog)
     order, desc = _order(nodes, catalog, prefs)
     pace = PACE_FACTOR[prefs.pace]
@@ -218,18 +252,31 @@ def build_pathway(levels: dict[str, int], target: TargetProfile, catalog: Catalo
 
         if n.induced_by:
             names = ", ".join(sorted({catalog.skills[d].name for d in n.induced_by}))
-            reason = f"Prerequisite for {names}. Getting to Beginner first makes those steps faster."
+            reason = (
+                f"Prerequisite for {names}. "
+                "Getting to Beginner first makes those steps faster."
+            )
         else:
             q = required[sid]
             reason = (
                 f"{target.title} needs {skill.name} at {LEVEL_LABELS[q.level]} level, "
                 f"importance {q.importance} of 5. "
-                + ("This is new for you." if n.from_level == 0 else f"You're at {LEVEL_LABELS[n.from_level]}.")
+                + (
+                    "This is new for you."
+                    if n.from_level == 0
+                    else f"You're at {LEVEL_LABELS[n.from_level]}."
+                )
             )
             if len(desc[sid]):
-                reason += f" Unlocks {len(desc[sid])} later step{'s' if len(desc[sid]) > 1 else ''}."
+                reason += (
+                    f" Unlocks {len(desc[sid])} later "
+                    f"step{'s' if len(desc[sid]) > 1 else ''}."
+                )
             if skill.category in prefs.interests:
-                reason += f" Matches your interest in {_lower_first(catalog.categories[skill.category])}."
+                reason += (
+                    " Matches your interest in "
+                    f"{_lower_first(catalog.categories[skill.category])}."
+                )
 
         steps.append({
             "order": i,
@@ -319,8 +366,16 @@ def suggest_electives(levels: dict[str, int], target: TargetProfile, plan_ids: s
             "category": skill.category,
             "ready": prereqs_met,
             "why": f"Fits your interest in {_lower_first(catalog.categories[skill.category])}"
-            + ("" if prereqs_met else "; needs " + ", ".join(catalog.skills[p].name for p in skill.prerequisites
-                                                             if levels.get(p, 0) < PREREQ_LEVEL)),
+            + (
+                ""
+                if prereqs_met
+                else "; needs "
+                + ", ".join(
+                    catalog.skills[p].name
+                    for p in skill.prerequisites
+                    if levels.get(p, 0) < PREREQ_LEVEL
+                )
+            ),
         })
     out.sort(key=lambda e: (not e["ready"], e["name"]))
     return out[:3]

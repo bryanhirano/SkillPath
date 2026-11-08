@@ -21,6 +21,7 @@ import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Protocol
 
 from .catalog import Catalog, normalize_text
@@ -35,11 +36,14 @@ BERT_MIN_SCORE = 0.55
 FUZZY_CUTOFF = 0.88
 
 STRONG_CUES = re.compile(
-    r"\b(expert|advanced|extensive|deep|architect(?:ed)?|led|lead|owned|designed|mentor(?:ed|ing)?|senior|principal|certified)\b",
+    r"\b(expert|advanced|extensive|deep|architect(?:ed)?|led|lead|owned|designed|"
+    r"mentor(?:ed|ing)?|senior|principal|certified)\b",
     re.I,
 )
 WEAK_CUES = re.compile(
-    r"\b(basic|familiar(?:ity)?|exposure|beginner|introductory|coursework|learning|some experience)\b", re.I
+    r"\b(basic|familiar(?:ity)?|exposure|beginner|introductory|coursework|"
+    r"learning|some experience)\b",
+    re.I,
 )
 YEARS_WINDOW = 25  # characters between "N years" and the skill name
 YEARS = re.compile(r"(\d{1,2})\s*\+?\s*(?:years?|yrs?)\b", re.I)
@@ -52,6 +56,8 @@ JD_OPTIONAL = re.compile(r"\b(nice to have|a plus|bonus|preferred|desirable|opti
 
 @dataclass
 class Mention:
+    """A single skill mention found in a resume or job description."""
+
     skill_id: str
     text: str
     sentence: str
@@ -60,7 +66,9 @@ class Mention:
 
 
 @dataclass
-class ExtractedSkill:
+class ExtractedSkill:  # pylint: disable=too-many-instance-attributes
+    """A normalized skill with proficiency estimate and supporting evidence."""
+
     skill_id: str
     name: str
     category: str
@@ -71,6 +79,7 @@ class ExtractedSkill:
     evidence: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
+        """Return the skill in the callable API representation."""
         return {
             "skillId": self.skill_id,
             "name": self.name,
@@ -83,7 +92,9 @@ class ExtractedSkill:
         }
 
 
-class SpanTagger(Protocol):
+class SpanTagger(Protocol):  # pylint: disable=too-few-public-methods
+    """Interface implemented by optional skill span taggers."""
+
     name: str
 
     def tag(self, sentences: list[str]) -> list[list[tuple[str, float]]]:
@@ -93,13 +104,14 @@ class SpanTagger(Protocol):
 # ------------------------------------------------------------------ BERT tagger
 
 
-class BertSpanTagger:
+class BertSpanTagger:  # pylint: disable=too-few-public-methods
     """Wraps one or more Hugging Face BIO token-classification models."""
 
     def __init__(self, model_ids: tuple[str, ...] = DEFAULT_MODELS, batch_size: int = 16):
-        from transformers import pipeline  # imported lazily: heavy
+        # Optional, heavyweight dependency; load only if BERT tagging is enabled.
+        from transformers import pipeline  # pylint: disable=import-error,import-outside-toplevel
 
-        self.name = "+".join(m.split("/")[-1] for m in model_ids)
+        self.name = "+".join(m.rsplit("/", maxsplit=1)[-1] for m in model_ids)
         self.batch_size = batch_size
         self._pipes = [
             pipeline("token-classification", model=m, aggregation_strategy="none", device=-1)
@@ -107,6 +119,7 @@ class BertSpanTagger:
         ]
 
     def tag(self, sentences: list[str]) -> list[list[tuple[str, float]]]:
+        """Return candidate skill spans and confidence scores per sentence."""
         results: list[list[tuple[str, float]]] = [[] for _ in sentences]
         for pipe in self._pipes:
             outputs = pipe(sentences, batch_size=self.batch_size)
@@ -123,7 +136,7 @@ def decode_bio(sentence: str, tokens: list[dict]) -> list[tuple[str, float]]:
     """
     spans: list[tuple[int, int, list[float]]] = []
     for tok in tokens:
-        label = str(tok.get("entity", "O")).split("-")[0].upper()
+        label = str(tok.get("entity", "O")).split("-", maxsplit=1)[0].upper()
         if label not in ("B", "I"):
             continue
         start, end = tok.get("start"), tok.get("end")
@@ -143,31 +156,30 @@ def decode_bio(sentence: str, tokens: list[dict]) -> list[tuple[str, float]]:
     ]
 
 
-_TAGGER: SpanTagger | None = None
-_TAGGER_LOADED = False
-
-
+@lru_cache(maxsize=1)
 def get_default_tagger() -> SpanTagger | None:
     """Load the BERT tagger once per warm instance; None if disabled or unavailable."""
-    global _TAGGER, _TAGGER_LOADED
-    if _TAGGER_LOADED:
-        return _TAGGER
-    _TAGGER_LOADED = True
     if os.environ.get("SKILLPATH_NER", "bert").lower() in ("off", "0", "false", "none"):
         return None
-    models = tuple(m.strip() for m in os.environ.get("SKILLPATH_NER_MODELS", "").split(",") if m.strip())
+    models = tuple(
+        model.strip()
+        for model in os.environ.get("SKILLPATH_NER_MODELS", "").split(",")
+        if model.strip()
+    )
     try:
-        _TAGGER = BertSpanTagger(models or DEFAULT_MODELS)
-    except Exception as exc:  # missing deps, no network to the model hub, OOM...
+        return BertSpanTagger(models or DEFAULT_MODELS)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        # Model loading can fail in several optional dependency and runtime paths.
+        # Keep the optional tagger fail-soft; taxonomy matching remains available.
         log.warning("BERT skill tagger unavailable, using taxonomy matcher only: %s", exc)
-        _TAGGER = None
-    return _TAGGER
+        return None
 
 
 # --------------------------------------------------------------- core pipeline
 
 
 def split_sentences(text: str) -> list[str]:
+    """Split text into bounded sentence fragments for skill extraction."""
     pieces: list[str] = []
     for line in text.splitlines():
         line = line.strip(" \t-*•·▪●–")
@@ -188,13 +200,19 @@ def normalize_span(span: str, catalog: Catalog) -> str | None:
     match = catalog.alias_pattern.search(span)
     if match:
         return catalog.resolve_alias(match.group(0))
-    close = difflib.get_close_matches(normalize_text(span), list(catalog.alias_index), n=1, cutoff=FUZZY_CUTOFF)
+    close = difflib.get_close_matches(
+        normalize_text(span),
+        list(catalog.alias_index),
+        n=1,
+        cutoff=FUZZY_CUTOFF,
+    )
     return catalog.alias_index[close[0]] if close else None
 
 
 def find_mentions(
     sentences: list[str], catalog: Catalog, tagger: SpanTagger | None
 ) -> tuple[list[Mention], dict[str, int]]:
+    """Find catalog skill aliases and optional model-tagged skill phrases."""
     mentions: list[Mention] = []
     unmapped: dict[str, int] = defaultdict(int)
 
@@ -207,7 +225,8 @@ def find_mentions(
     if tagger is not None:
         try:
             tagged = tagger.tag(sentences)
-        except Exception as exc:
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            # A failed optional model should not prevent taxonomy-based results.
             log.warning("BERT tagging failed, continuing with taxonomy matches: %s", exc)
             tagged = []
         for sentence, spans in zip(sentences, tagged):
@@ -237,7 +256,9 @@ def estimate_level(mentions: list[tuple[str, str]]) -> int:
     for sentence, text in unique:
         pos = sentence.lower().find(text.lower())
         for m in YEARS.finditer(sentence):
-            if pos >= 0 and (abs(m.end() - pos) <= YEARS_WINDOW or abs(m.start() - (pos + len(text))) <= YEARS_WINDOW):
+            near_start = abs(m.end() - pos) <= YEARS_WINDOW
+            near_end = abs(m.start() - (pos + len(text))) <= YEARS_WINDOW
+            if pos >= 0 and (near_start or near_end):
                 years.append(int(m.group(1)))
     if years:
         y = max(years)
@@ -257,7 +278,9 @@ def _snippet(sentence: str, needle: str, width: int = 140) -> str:
     return ("…" if start else "") + sentence[start:start + width].strip() + "…"
 
 
+# pylint: disable=too-many-locals
 def extract_skills(text: str, catalog: Catalog, tagger: SpanTagger | None = None) -> dict:
+    """Identify skills in text and return estimates with evidence and metadata."""
     sentences = split_sentences(text)
     mentions, unmapped = find_mentions(sentences, catalog, tagger)
 

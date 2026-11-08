@@ -1,6 +1,6 @@
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
-import { getFunctions, httpsCallable } from "firebase/functions";
 import "../backend/firebase.jsx"; // makes sure the Firebase app is initialized
 
 /**
@@ -14,6 +14,7 @@ const ResumeSkills = ({ refreshKey }) => {
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState("");
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey intentionally triggers a reload after upload.
 	useEffect(() => {
 		if (!uid) {
 			setSkills([]);

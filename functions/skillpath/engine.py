@@ -36,7 +36,12 @@ def analyze(payload: dict, catalog: Catalog, tagger: SpanTagger | None = None) -
         "currentRole": (payload.get("currentRole") or "").strip()[:80] or None,
         "target": target.to_dict(),
         "requirements": [
-            {"skillId": q.skill_id, "level": q.level, "importance": q.importance} for q in target.requirements
+            {
+                "skillId": q.skill_id,
+                "level": q.level,
+                "importance": q.importance,
+            }
+            for q in target.requirements
         ],
         "inputSkills": levels,
         "preferences": {
@@ -55,11 +60,15 @@ def analyze(payload: dict, catalog: Catalog, tagger: SpanTagger | None = None) -
 
 def _summary(title: str, gaps: dict, pathway: dict) -> str:
     if not gaps["gaps"]:
-        return f"You already meet every core requirement for {title}. Consider the electives to keep growing."
+        return (
+            f"You already meet every core requirement for {title}. "
+            "Consider the electives to keep growing."
+        )
     top = ", ".join(g["name"] for g in gaps["gaps"][:3])
     weeks = pathway["totalWeeks"]
     return (
         f"You're {gaps['readiness']:.0f}% of the way to {title}. "
         f"The biggest gaps are {top}. At {pathway['hoursPerWeek']:g} hours a week, "
-        f"the pathway takes about {weeks} week{'s' if weeks != 1 else ''} ({pathway['totalHours']} hours)."
+        f"the pathway takes about {weeks} week{'s' if weeks != 1 else ''} "
+        f"({pathway['totalHours']} hours)."
     )
