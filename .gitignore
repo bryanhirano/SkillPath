@@ -17,6 +17,12 @@ firebase-debug.*.log*
 # it commented so all members can deploy to the same project(s) in .firebaserc.
 # .firebaserc
 
+# Python bytecode
+__pycache__/
+
+# Python virtual environment
+venv/
+
 # Runtime data
 pids
 *.pid
@@ -48,6 +54,10 @@ build/Release
 # Dependency directories
 node_modules/
 
+# Build output
+dist/
+dist-ssr/
+
 # Optional npm cache directory
 .npm
 
@@ -65,6 +75,18 @@ node_modules/
 
 # dotenv environment variables file
 .env
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.local
 
 # dataconnect generated files
 .dataconnect

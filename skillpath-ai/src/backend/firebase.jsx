@@ -3,8 +3,10 @@ import {
 	browserSessionPersistence,
 	createUserWithEmailAndPassword,
 	deleteUser,
+	GoogleAuthProvider,
 	getAdditionalUserInfo,
 	getAuth,
+	sendPasswordResetEmail,
 	setPersistence,
 	signInWithEmailAndPassword,
 	signInWithPopup,
@@ -12,9 +14,9 @@ import {
 	updateProfile,
 } from "firebase/auth";
 import { child, get, getDatabase, ref, update } from "firebase/database";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import {
 	deleteObject,
-	getDownloadURL,
 	getStorage,
 	ref as storageRefs,
 	uploadBytesResumable,
@@ -34,8 +36,9 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const data = getDatabase(app);
 const dbRef = ref(data);
-const storage = getStorage();
+const storage = getStorage(app);
 export const auth = getAuth();
+const functions = getFunctions(app, "us-central1");
 
 const persistenceReady = setPersistence(auth, browserSessionPersistence).catch(
 	(error) => console.error("Could not set auth persistence:", error),
@@ -170,50 +173,57 @@ export function getInfo(parent) {
 	});
 }
 
-export function uploadResume(uid, file) {
-	return new Promise((resolve, reject) => {
-		let contentType = file.type;
+export async function uploadResume(uid, file) {
+	const user = auth.currentUser;
+	if (!user || user.uid !== uid) {
+		throw new Error("You must be signed in to upload your own resume.");
+	}
+	if (!file) {
+		throw new Error("Please select a file.");
+	}
 
-		if (!contentType) {
-			if (file.name.endsWith(".pdf")) {
-				contentType = "application/pdf";
-			} else if (file.name.endsWith(".docx")) {
-				contentType =
-					"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-			} else {
-				contentType = "application/octet-stream";
-			}
-		}
+	const fileName = file.name.toLowerCase();
+	let contentType;
+	if (fileName.endsWith(".pdf")) {
+		contentType = "application/pdf";
+	} else if (fileName.endsWith(".docx")) {
+		contentType =
+			"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+	} else {
+		throw new Error("Only PDF and DOCX resumes are supported.");
+	}
 
-		const metadata = {
-			contentType,
-			name: uid,
-		};
+	if (file.size >= 5 * 1024 * 1024) {
+		throw new Error("Resume must be smaller than 5 MB.");
+	}
 
-		const storageRef = storageRefs(storage, `resume/${uid}`);
-		const uploadTask = uploadBytesResumable(storageRef, file, metadata);
+	const filePath = `resume/${uid}/`;
+	const storageRef = storageRefs(storage, filePath);
+	const metadata = {
+		contentType,
+		customMetadata: {
+			originalFileName: file.name,
+		},
+	};
 
-		uploadTask.on(
-			"state_changed",
-			(snapshot) => {
-				const progress =
-					(snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-				console.log(`Upload·is·${progress}%·done`);
-			},
-			(error) => {
-				console.error(error);
-				reject(error); // Reject the promise on error
-			},
-			() => {
-				getDownloadURL(uploadTask.snapshot.ref).then((downloadURL) => {
-					const updates = {};
-					updates[`users/${uid}/resume`] = downloadURL;
+	const snapshot = await uploadBytesResumable(storageRef, file, metadata);
+	try {
+		await update(ref(data), {
+			[`users/${uid}/resumePath`]: snapshot.ref.fullPath,
+			[`users/${uid}/resumeFileName`]: file.name,
+			[`users/${uid}/resumeContentType`]: contentType,
+		});
+	} catch (error) {
+		await deleteObject(snapshot.ref).catch((cleanupError) => {
+			console.error(
+				"Could not remove the unrecorded resume upload.",
+				cleanupError,
+			);
+		});
+		throw error;
+	}
 
-					update(ref(data), updates).then(() => resolve(downloadURL));
-				});
-			},
-		);
-	});
+	return snapshot.ref.fullPath;
 }
 
 export const _deleteUser = () => {
@@ -240,11 +250,44 @@ export const _deleteUser = () => {
 };
 
 export function saveResumeText(uid, text) {
+	const user = auth.currentUser;
+	if (!user || user.uid !== uid) {
+		return Promise.reject(
+			new Error("You must be signed in to save your resume."),
+		);
+	}
+	if (typeof text !== "string" || text.length > 100000) {
+		return Promise.reject(
+			new Error("Resume text must be 100,000 characters or fewer."),
+		);
+	}
+
 	const updates = {};
 	updates[`users/${uid}/resumeText`] = text;
 
-	// Optional: clear out the file resume URL if they switch to text
-	// updates[`users/${uid}/resume`] = null;
-
 	return update(ref(data), updates);
+}
+
+export async function extractResumeText() {
+	const user = auth.currentUser;
+	if (!user) {
+		throw new Error("Please sign in first.");
+	}
+
+	await user.getIdToken();
+	const callable = httpsCallable(functions, "extract_resume_text");
+	const result = await callable({});
+	return result.data;
+}
+
+export async function analyzeResume() {
+	const user = auth.currentUser;
+	if (!user) {
+		throw new Error("Please sign in first.");
+	}
+
+	await user.getIdToken();
+	const callable = httpsCallable(functions, "analyze_resume");
+	const result = await callable({});
+	return result.data;
 }

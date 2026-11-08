@@ -1,0 +1,119 @@
+{
+	"roles": [
+		{
+			"id": "bookkeeper",
+			"title": "Bookkeeper",
+			"onetCode": "43-3031.00",
+			"onetTitle": "Bookkeeping, Accounting, and Auditing Clerks",
+			"requirements": [
+				{ "skillId": "bookkeeping", "level": 4, "importance": 5 },
+				{ "skillId": "quickbooks", "level": 3, "importance": 4 },
+				{ "skillId": "excel", "level": 3, "importance": 4 },
+				{ "skillId": "payroll", "level": 3, "importance": 3 },
+				{ "skillId": "data-entry", "level": 3, "importance": 3 },
+				{ "skillId": "communication", "level": 2, "importance": 2 }
+			]
+		},
+		{
+			"id": "accountant",
+			"title": "Accountant",
+			"onetCode": "13-2011.00",
+			"onetTitle": "Accountants and Auditors",
+			"requirements": [
+				{ "skillId": "accounting", "level": 4, "importance": 5 },
+				{ "skillId": "excel", "level": 4, "importance": 4 },
+				{ "skillId": "financial-analysis", "level": 3, "importance": 4 },
+				{ "skillId": "budgeting", "level": 3, "importance": 3 },
+				{ "skillId": "quickbooks", "level": 2, "importance": 2 },
+				{ "skillId": "communication", "level": 3, "importance": 3 }
+			]
+		},
+		{
+			"id": "administrative-assistant",
+			"title": "Administrative Assistant",
+			"onetCode": "43-6014.00",
+			"onetTitle": "Secretaries and Administrative Assistants, Except Legal, Medical, and Executive",
+			"requirements": [
+				{ "skillId": "administrative-support", "level": 4, "importance": 5 },
+				{ "skillId": "microsoft-365", "level": 3, "importance": 4 },
+				{ "skillId": "communication", "level": 3, "importance": 4 },
+				{ "skillId": "customer-service", "level": 3, "importance": 3 },
+				{ "skillId": "data-entry", "level": 3, "importance": 3 },
+				{ "skillId": "excel", "level": 2, "importance": 2 }
+			]
+		},
+		{
+			"id": "financial-analyst",
+			"title": "Financial Analyst",
+			"onetCode": "13-2051.00",
+			"onetTitle": "Financial and Investment Analysts",
+			"requirements": [
+				{ "skillId": "financial-analysis", "level": 4, "importance": 5 },
+				{ "skillId": "excel", "level": 4, "importance": 5 },
+				{ "skillId": "accounting", "level": 3, "importance": 4 },
+				{ "skillId": "budgeting", "level": 3, "importance": 3 },
+				{ "skillId": "sql", "level": 2, "importance": 2 },
+				{ "skillId": "data-visualization", "level": 2, "importance": 2 },
+				{ "skillId": "communication", "level": 3, "importance": 3 }
+			]
+		},
+		{
+			"id": "software-developer",
+			"title": "Software Developer",
+			"onetCode": "15-1252.00",
+			"onetTitle": "Software Developers",
+			"requirements": [
+				{ "skillId": "javascript", "level": 4, "importance": 5 },
+				{ "skillId": "python", "level": 3, "importance": 4 },
+				{ "skillId": "git", "level": 3, "importance": 4 },
+				{ "skillId": "sql", "level": 3, "importance": 3 },
+				{ "skillId": "react", "level": 3, "importance": 3 },
+				{ "skillId": "node-js", "level": 3, "importance": 3 },
+				{ "skillId": "agile", "level": 2, "importance": 2 }
+			]
+		},
+		{
+			"id": "project-manager",
+			"title": "Project Manager",
+			"onetCode": "13-1082.00",
+			"onetTitle": "Project Management Specialists",
+			"requirements": [
+				{ "skillId": "project-management", "level": 4, "importance": 5 },
+				{ "skillId": "leadership", "level": 4, "importance": 4 },
+				{ "skillId": "communication", "level": 4, "importance": 5 },
+				{ "skillId": "agile", "level": 3, "importance": 4 },
+				{ "skillId": "budgeting", "level": 3, "importance": 3 },
+				{ "skillId": "excel", "level": 2, "importance": 2 }
+			]
+		},
+		{
+			"id": "data-analyst",
+			"title": "Data Analyst",
+			"onetCode": null,
+			"onetTitle": null,
+			"requirements": [
+				{ "skillId": "data-analysis", "level": 4, "importance": 5 },
+				{ "skillId": "sql", "level": 4, "importance": 5 },
+				{ "skillId": "excel", "level": 4, "importance": 4 },
+				{ "skillId": "data-visualization", "level": 3, "importance": 4 },
+				{ "skillId": "statistics", "level": 3, "importance": 3 },
+				{ "skillId": "python", "level": 2, "importance": 3 },
+				{ "skillId": "communication", "level": 3, "importance": 3 }
+			]
+		},
+		{
+			"id": "cybersecurity-analyst",
+			"title": "Cybersecurity Analyst",
+			"onetCode": "15-1212.00",
+			"onetTitle": "Information Security Analysts",
+			"requirements": [
+				{ "skillId": "cybersecurity", "level": 4, "importance": 5 },
+				{ "skillId": "networking", "level": 4, "importance": 5 },
+				{ "skillId": "linux", "level": 3, "importance": 4 },
+				{ "skillId": "python", "level": 2, "importance": 3 },
+				{ "skillId": "aws", "level": 2, "importance": 2 },
+				{ "skillId": "communication", "level": 3, "importance": 3 }
+			]
+		}
+	]
+}

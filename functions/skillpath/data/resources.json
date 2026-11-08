@@ -1,0 +1,125 @@
+{
+	"resources": [
+		{
+			"id": "python-tutorial",
+			"title": "The Python Tutorial",
+			"provider": "python.org",
+			"url": "https://docs.python.org/3/tutorial/",
+			"skills": ["python"],
+			"levels": [1, 3],
+			"format": "docs",
+			"hours": 15,
+			"cost": "free"
+		},
+		{
+			"id": "mdn-js-guide",
+			"title": "JavaScript Guide",
+			"provider": "MDN",
+			"url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide",
+			"skills": ["javascript"],
+			"levels": [1, 3],
+			"format": "docs",
+			"hours": 20,
+			"cost": "free"
+		},
+		{
+			"id": "mdn-learn-web",
+			"title": "Learn web development",
+			"provider": "MDN",
+			"url": "https://developer.mozilla.org/en-US/docs/Learn",
+			"skills": ["html-css", "javascript"],
+			"levels": [1, 3],
+			"format": "course",
+			"hours": 30,
+			"cost": "free"
+		},
+		{
+			"id": "react-learn",
+			"title": "Learn React",
+			"provider": "react.dev",
+			"url": "https://react.dev/learn",
+			"skills": ["react"],
+			"levels": [1, 3],
+			"format": "interactive",
+			"hours": 12,
+			"cost": "free"
+		},
+		{
+			"id": "sqlbolt",
+			"title": "SQLBolt interactive lessons",
+			"provider": "SQLBolt",
+			"url": "https://sqlbolt.com/",
+			"skills": ["sql"],
+			"levels": [1, 3],
+			"format": "interactive",
+			"hours": 6,
+			"cost": "free"
+		},
+		{
+			"id": "pro-git",
+			"title": "Pro Git",
+			"provider": "git-scm.com",
+			"url": "https://git-scm.com/book",
+			"skills": ["git"],
+			"levels": [1, 4],
+			"format": "book",
+			"hours": 15,
+			"cost": "free"
+		},
+		{
+			"id": "docker-get-started",
+			"title": "Docker: Get started",
+			"provider": "Docker",
+			"url": "https://docs.docker.com/get-started/",
+			"skills": ["docker"],
+			"levels": [1, 3],
+			"format": "docs",
+			"hours": 6,
+			"cost": "free"
+		},
+		{
+			"id": "sklearn-tutorials",
+			"title": "scikit-learn tutorials",
+			"provider": "scikit-learn",
+			"url": "https://scikit-learn.org/stable/tutorial/",
+			"skills": ["machine-learning"],
+			"levels": [2, 3],
+			"format": "docs",
+			"hours": 15,
+			"cost": "free"
+		},
+		{
+			"id": "khan-stats",
+			"title": "Statistics and probability",
+			"provider": "Khan Academy",
+			"url": "https://www.khanacademy.org/math/statistics-probability",
+			"skills": ["statistics"],
+			"levels": [1, 3],
+			"format": "course",
+			"hours": 30,
+			"cost": "free"
+		},
+		{
+			"id": "aws-skill-builder",
+			"title": "AWS Skill Builder",
+			"provider": "AWS",
+			"url": "https://skillbuilder.aws/",
+			"skills": ["aws"],
+			"levels": [1, 4],
+			"format": "course",
+			"hours": 20,
+			"cost": "free"
+		},
+		{
+			"id": "tryhackme",
+			"title": "TryHackMe learning paths",
+			"provider": "TryHackMe",
+			"url": "https://tryhackme.com/",
+			"skills": ["cybersecurity", "networking", "linux"],
+			"levels": [1, 3],
+			"format": "interactive",
+			"hours": 40,
+			"cost": "free"
+		}
+	]
+}
