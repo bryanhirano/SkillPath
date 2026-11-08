@@ -1,3 +1,7 @@
-firebase_functions~=0.5.0
-pypdf~=5.0
-python-docx~=1.1
+firebase-functions
+firebase-admin
+pypdf
+python-docx
+# Optional BERT skill tagger (needs ~2 GB memory on the function):
+# transformers
+# torch

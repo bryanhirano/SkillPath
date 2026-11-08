@@ -3,16 +3,23 @@
 import io
 import logging
 import re
+import zipfile
 
 from docx import Document
-from firebase_admin import db, initialize_app, storage
+from firebase_admin import initialize_app, storage
 from firebase_functions import https_fn
 from firebase_functions.options import set_global_options
+from google.api_core.exceptions import NotFound
 from pypdf import PdfReader
+
+from skillpath.catalog import load_catalog
+from skillpath.extraction import extract_skills, get_default_tagger
+from skillpath.text_extract import clean_text
 
 PROJECT_ID = "mynotes-ae8c6"
 DATABASE_URL = "https://mynotes-ae8c6-default-rtdb.firebaseio.com"
 STORAGE_BUCKET = "mynotes-ae8c6.firebasestorage.app"
+RESUME_FOLDER = "resume"
 MAX_FILE_SIZE = 5 * 1024 * 1024
 MAX_TEXT_LENGTH = 100000
 MAX_PDF_PAGES = 50
@@ -25,6 +32,23 @@ initialize_app(
         "storageBucket": STORAGE_BUCKET,
     }
 )
+
+
+def _resume_path(uid):
+    """Return the Storage path of a user's resume.
+
+    Resumes are stored as a single object named after the user's UID,
+    e.g. ``resume/yhC97aSmzhOHom9yyECqUkcXrGD2`` (no extension, no subfolder).
+    The path is built from the authenticated UID rather than read from the
+    database, so a caller can never point the function at another user's file.
+
+    Args:
+        uid: Firebase Authentication UID of the resume owner.
+
+    Returns:
+        The object path inside the configured bucket.
+    """
+    return f"{RESUME_FOLDER}/{uid}"
 
 
 def _extract_pdf_text(file_bytes):
@@ -41,10 +65,11 @@ def _extract_pdf_text(file_bytes):
     """
     try:
         reader = PdfReader(io.BytesIO(file_bytes))
+        page_count = len(reader.pages)
     except Exception as error:
         raise ValueError("The PDF could not be read.") from error
 
-    if len(reader.pages) > MAX_PDF_PAGES:
+    if page_count > MAX_PDF_PAGES:
         raise ValueError("PDF exceeds the 50-page limit.")
 
     paragraphs = []
@@ -85,6 +110,17 @@ def _extract_docx_text(file_bytes):
     return "\n".join(paragraphs)
 
 
+def _is_docx(file_bytes):
+    """Return whether the bytes are a ZIP archive containing a Word document."""
+    if not file_bytes.startswith(b"PK"):
+        return False
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
+            return "word/document.xml" in archive.namelist()
+    except zipfile.BadZipFile:
+        return False
+
+
 def _download_resume(file_path):
     """Download a resume from Firebase Storage if it is below the size limit.
 
@@ -95,6 +131,7 @@ def _download_resume(file_path):
         The downloaded resume contents.
 
     Raises:
+        NotFound: If no object exists at the path.
         ValueError: If the object's size is unavailable or reaches the limit.
     """
     bucket = storage.bucket(STORAGE_BUCKET)
@@ -104,38 +141,34 @@ def _download_resume(file_path):
     if blob.size is None or blob.size >= MAX_FILE_SIZE:
         raise ValueError("Resume must be smaller than the 5 MB limit.")
 
-    file_bytes = blob.download_as_bytes()
+    file_bytes = blob.download_as_bytes(if_generation_match=blob.generation)
     if len(file_bytes) >= MAX_FILE_SIZE:
         raise ValueError("Resume must be smaller than the 5 MB limit.")
     return file_bytes
 
 
-def _extract_document_text(file_bytes, file_name, content_type):
-    """Validate a PDF or DOCX and extract text within the configured limit.
+def _extract_document_text(file_bytes):
+    """Detect PDF or DOCX from the file contents and extract its text.
+
+    The stored object has no file extension and its metadata may not carry a
+    reliable content type, so the format is identified from the file's own
+    signature instead.
 
     Args:
         file_bytes: The uploaded document contents.
-        file_name: The original name used to determine the document format.
-        content_type: The document's declared MIME type.
 
     Returns:
-        Extracted, trimmed document text.
+        A tuple of the detected extension ("pdf" or "docx") and the extracted,
+        trimmed document text.
 
     Raises:
-        ValueError: If the format, signature, contents, or text length is invalid.
+        ValueError: If the format, contents, or text length is invalid.
     """
-    file_name = file_name.lower()
-    if file_name.endswith(".pdf") and content_type == "application/pdf":
-        if not file_bytes.startswith(b"%PDF-"):
-            raise ValueError("The file is not a valid PDF.")
+    if file_bytes.startswith(b"%PDF-"):
+        file_type = "pdf"
         text = _extract_pdf_text(file_bytes)
-    elif (
-        file_name.endswith(".docx")
-        and content_type
-        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    ):
-        if not file_bytes.startswith(b"PK"):
-            raise ValueError("The file is not a valid DOCX.")
+    elif _is_docx(file_bytes):
+        file_type = "docx"
         text = _extract_docx_text(file_bytes)
     else:
         raise ValueError("Only PDF and DOCX resumes are supported.")
@@ -143,7 +176,7 @@ def _extract_document_text(file_bytes, file_name, content_type):
     text = text.strip()
     if len(text) > MAX_TEXT_LENGTH:
         raise ValueError("Extracted resume text exceeds the 100,000 character limit.")
-    return text
+    return file_type, text
 
 
 def _load_resume_text(uid):
@@ -153,58 +186,22 @@ def _load_resume_text(uid):
         uid: Firebase Authentication UID of the resume owner.
 
     Returns:
-        A tuple containing the original file name and extracted text.
+        A tuple containing a display file name and the extracted text.
 
     Raises:
-        https_fn.HttpsError: If metadata is missing or invalid, the file is
-            unavailable, or its contents cannot be extracted.
+        https_fn.HttpsError: If the file is missing, invalid, or its contents
+            cannot be extracted.
     """
-    try:
-        user_data = db.reference(f"users/{uid}").get() or {}
-    except Exception as error:
-        logging.exception("Failed to retrieve resume metadata.")
-        raise https_fn.HttpsError(
-            code=https_fn.FunctionsErrorCode.INTERNAL,
-            message="Unable to retrieve resume metadata.",
-        ) from error
-
-    if not isinstance(user_data, dict):
-        raise https_fn.HttpsError(
-            code=https_fn.FunctionsErrorCode.NOT_FOUND,
-            message="No valid resume record found.",
-        )
-
-    file_path = user_data.get("resumePath")
-    file_name = user_data.get("resumeFileName")
-    content_type = user_data.get("resumeContentType")
-    if not all(
-        isinstance(value, str) and value
-        for value in (file_path, file_name, content_type)
-    ):
-        raise https_fn.HttpsError(
-            code=https_fn.FunctionsErrorCode.NOT_FOUND,
-            message="No uploaded resume was found.",
-        )
-
-    allowed_prefix = f"resumes/{uid}/"
-    stored_file_name = file_path[len(allowed_prefix) :]
-    if (
-        not file_path.startswith(allowed_prefix)
-        or not stored_file_name
-        or "/" in stored_file_name
-    ):
-        raise https_fn.HttpsError(
-            code=https_fn.FunctionsErrorCode.PERMISSION_DENIED,
-            message="Invalid resume storage path.",
-        )
+    file_path = _resume_path(uid)
 
     try:
         file_bytes = _download_resume(file_path)
-        extracted_text = _extract_document_text(
-            file_bytes,
-            file_name,
-            content_type,
-        )
+        file_type, extracted_text = _extract_document_text(file_bytes)
+    except NotFound as error:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.NOT_FOUND,
+            message="No uploaded resume was found.",
+        ) from error
     except ValueError as error:
         logging.warning("Resume validation failed: %s", error)
         raise https_fn.HttpsError(
@@ -224,7 +221,7 @@ def _load_resume_text(uid):
             message="The resume contains no extractable text.",
         )
 
-    return file_name, extracted_text
+    return f"resume.{file_type}", extracted_text
 
 
 @https_fn.on_call()
@@ -235,12 +232,12 @@ def extract_resume_text(request: https_fn.CallableRequest):
         request: The Firebase callable request, including authentication data.
 
     Returns:
-        A mapping with success status, original file name, extracted text, and
+        A mapping with success status, file name, extracted text, and
         character count.
 
     Raises:
         https_fn.HttpsError: If the caller is unauthenticated or the resume
-            metadata, file, or extracted text is invalid.
+            file or extracted text is invalid.
     """
     if request.auth is None:
         raise https_fn.HttpsError(
@@ -254,6 +251,54 @@ def extract_resume_text(request: https_fn.CallableRequest):
         "fileName": file_name,
         "text": extracted_text,
         "characterCount": len(extracted_text),
+    }
+
+
+@https_fn.on_call()
+def identify_resume_skills(request: https_fn.CallableRequest):
+    """Identify skills in the caller's resume using the SkillPath engine.
+
+    The resume text is cleaned and capped by ``skillpath.text_extract`` and
+    then matched against the skill catalog in ``skillpath/data``. If the BERT
+    tagger is installed and enabled (``SKILLPATH_NER``), it adds skills the
+    catalog aliases miss; otherwise the taxonomy matcher runs alone.
+
+    Args:
+        request: The Firebase callable request, including authentication data.
+
+    Returns:
+        A mapping with success status and the identified skills, each with
+        ``skillId``, ``name``, ``category``, estimated ``level`` (1-5) and
+        ``confidence``.
+
+    Raises:
+        https_fn.HttpsError: If the caller is unauthenticated, the resume is
+            missing or invalid, or skill extraction fails.
+    """
+    if request.auth is None:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
+            message="Please sign in first.",
+        )
+
+    _, resume_text = _load_resume_text(request.auth.uid)
+
+    try:
+        result = extract_skills(
+            clean_text(resume_text),
+            load_catalog(),
+            get_default_tagger(),
+        )
+    except Exception as error:
+        logging.exception("Skill extraction failed.")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message="Skill identification failed.",
+        ) from error
+
+    return {
+        "status": "success",
+        "skills": result["skills"],
     }
 
 
@@ -273,8 +318,7 @@ def analyze_resume(request: https_fn.CallableRequest):
 
     Raises:
         https_fn.HttpsError: If the caller is unauthenticated or the resume
-            metadata, file, or extracted text is invalid.
-    """
+            file or extracted text is invalid. """
     if request.auth is None:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
