@@ -198,7 +198,7 @@ export async function uploadResume(uid, file) {
 	}
 
 
-	const filePath = `resumes/${uid}/`;
+	const filePath = `resume/${uid}/`;
 	const storageRef = storageRefs(storage, filePath);
 	const metadata = {
 		contentType,
