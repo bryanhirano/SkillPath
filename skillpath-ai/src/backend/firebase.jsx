@@ -23,14 +23,14 @@ import {
 } from "firebase/storage";
 
 const firebaseConfig = {
-	apiKey: "AIzaSyCe3SDg7jbMIhKT_6XIMhyUeHxtwUU9AFA",
-	authDomain: "mynotes-ae8c6.firebaseapp.com",
-	databaseURL: "https://mynotes-ae8c6-default-rtdb.firebaseio.com",
-	projectId: "mynotes-ae8c6",
-	storageBucket: "mynotes-ae8c6.firebasestorage.app",
-	messagingSenderId: "195557582263",
-	appId: "1:195557582263:web:a303478baeb642b60af432",
-	measurementId: "G-CDNQ1PFJDN",
+	VITE_FIREBASE_API_KEY=AIzaSyCe3SDg7jbMIhKT_6XIMhyUeHxtwUU9AFA
+	VITE_FIREBASE_AUTH_DOMAIN=mynotes-ae8c6.firebaseapp.com
+	VITE_FIREBASE_DATABASE_URL=https://mynotes-ae8c6-default-rtdb.firebaseio.com
+	VITE_FIREBASE_PROJECT_ID=mynotes-ae8c6
+	VITE_FIREBASE_STORAGE_BUCKET=mynotes-ae8c6.firebasestorage.app
+	VITE_FIREBASE_MESSAGING_SENDER_ID=195557582263
+	VITE_FIREBASE_APP_ID=1:195557582263:web:a303478baeb642b60af432
+	VITE_FIREBASE_MEASUREMENT_ID=G-CDNQ1PFJDN
 };
 
 const app = initializeApp(firebaseConfig);
