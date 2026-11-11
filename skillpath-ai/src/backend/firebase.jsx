@@ -23,14 +23,14 @@ import {
 } from "firebase/storage";
 
 const firebaseConfig = {
-	VITE_FIREBASE_API_KEY=AIzaSyCe3SDg7jbMIhKT_6XIMhyUeHxtwUU9AFA
-	VITE_FIREBASE_AUTH_DOMAIN=mynotes-ae8c6.firebaseapp.com
-	VITE_FIREBASE_DATABASE_URL=https://mynotes-ae8c6-default-rtdb.firebaseio.com
-	VITE_FIREBASE_PROJECT_ID=mynotes-ae8c6
-	VITE_FIREBASE_STORAGE_BUCKET=mynotes-ae8c6.firebasestorage.app
-	VITE_FIREBASE_MESSAGING_SENDER_ID=195557582263
-	VITE_FIREBASE_APP_ID=1:195557582263:web:a303478baeb642b60af432
-	VITE_FIREBASE_MEASUREMENT_ID=G-CDNQ1PFJDN
+	apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+	authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+	databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
+	projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+	storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+	messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+	appId: import.meta.env.VITE_FIREBASE_APP_ID,
+	measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
 const app = initializeApp(firebaseConfig);
