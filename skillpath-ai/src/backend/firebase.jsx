@@ -45,14 +45,7 @@ import {
 // ============================================
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCe3SDg7jbMIhKT_6XIMhyUeHxtwUU9AFA",
-  authDomain: "mynotes-ae8c6.firebaseapp.com",
-  databaseURL: "https://mynotes-ae8c6-default-rtdb.firebaseio.com",
-  projectId: "mynotes-ae8c6",
-  storageBucket: "mynotes-ae8c6.firebasestorage.app",
-  messagingSenderId: "195557582263",
-  appId: "1:195557582263:web:a303478baeb642b60af432",
-  measurementId: "G-CDNQ1PFJDN"
+
 };
 
 // Initialize Firebase
