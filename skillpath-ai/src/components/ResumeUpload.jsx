@@ -1,368 +1,343 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
+import { Link } from "react-router-dom";
 import {
 	analyzeResume,
 	extractResumeText,
-	saveResumeText,
-	uploadResume,
+	identifyResumeSkills,
 } from "../backend/firebase.jsx";
+import Loading from "./Loading.jsx";
 
-const MAX_RESUME_TEXT_LENGTH = 100000;
+/**
+ * Resume dashboard: runs extract_resume_text, identify_resume_skills and
+ * analyze_resume together for the signed-in user and shows the results.
+ */
 
-const ResumeUpload = () => {
+const LEVEL_LABELS = [
+	"None",
+	"Awareness",
+	"Beginner",
+	"Intermediate",
+	"Advanced",
+	"Expert",
+];
+const DEGREE_ORDER = [
+	"Doctorate",
+	"Master's Degree",
+	"Bachelor's Degree",
+	"Associate Degree",
+];
+const EMPTY_RESULTS = { text: null, skills: null, analysis: null };
+
+const formatCategory = (category) =>
+	category ? category.charAt(0).toUpperCase() + category.slice(1) : "Other";
+
+// Turn one Promise.allSettled entry into { value, error }.
+const settle = (result, fallbackError) => {
+	if (result.status === "rejected") {
+		return { value: null, error: result.reason?.message || fallbackError };
+	}
+	if (result.value?.status !== "success") {
+		return { value: null, error: fallbackError };
+	}
+	return { value: result.value, error: "" };
+};
+
+const StatCard = ({ label, value, hint }) => (
+	<div className="col-6 col-lg-3">
+		<div className="card h-100 shadow-sm text-center">
+			<div className="card-body">
+				<div className="text-muted small">{label}</div>
+				<div className="fs-4 fw-semibold">{value}</div>
+				{hint && <div className="text-muted small">{hint}</div>}
+			</div>
+		</div>
+	</div>
+);
+
+const SectionError = ({ message }) => (
+	<div className="alert alert-danger py-2 mb-0" role="alert">
+		{message}
+	</div>
+);
+
+const ResumeDashboard = () => {
 	const uid = useSelector((state) => state.authedUser);
-	const [mode, setMode] = useState("file");
-	const [file, setFile] = useState(null);
-	const [text, setText] = useState("");
-	const [busy, setBusy] = useState(false);
-	const [extracting, setExtracting] = useState(false);
-	const [analyzing, setAnalyzing] = useState(false);
-	const [message, setMessage] = useState("");
-	const [error, setError] = useState("");
-	const [extractedText, setExtractedText] = useState("");
-	const [extractedFileName, setExtractedFileName] = useState("");
-	const [analysis, setAnalysis] = useState(null);
-	const isBusy = busy || extracting || analyzing;
+	const [results, setResults] = useState(EMPTY_RESULTS);
+	const [errors, setErrors] = useState({});
+	// Start in the loading state so the page never flashes "No results" before the first run.
+	const [loading, setLoading] = useState(true);
+	const [reloadCount, setReloadCount] = useState(0);
 
-	const handleFileChange = (event) => {
-		const selected = event.target.files?.[0];
-		if (!selected) return;
-
-		const fileName = selected.name.toLowerCase();
-		if (fileName.endsWith(".pdf") || fileName.endsWith(".docx")) {
-			setFile(selected);
-			setError("");
-			setMessage("");
-			setExtractedText("");
-			setExtractedFileName("");
-			setAnalysis(null);
-			return;
-		}
-
-		setFile(null);
-		setError("Please select a valid PDF or DOCX file.");
-		event.target.value = "";
-	};
-
-	const handleSubmit = async (event) => {
-		event.preventDefault();
-		setError("");
-		setMessage("");
-
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reloadCount intentionally triggers a reload.
+	useEffect(() => {
 		if (!uid) {
-			setError("Please sign in first.");
+			setResults(EMPTY_RESULTS);
+			setErrors({});
+			setLoading(false);
 			return;
 		}
 
-		if (mode === "file" && !file) {
-			setError("Please select a file to upload.");
-			return;
-		}
+		let cancelled = false;
+		setLoading(true);
+		setErrors({});
 
-		if (mode === "text" && !text.trim()) {
-			setError("Please type or paste your resume text.");
-			return;
-		}
+		Promise.allSettled([
+			extractResumeText(),
+			identifyResumeSkills(),
+			analyzeResume(),
+		]).then(([textResult, skillsResult, analysisResult]) => {
+			if (cancelled) return;
+			const text = settle(textResult, "Resume text extraction failed.");
+			const skills = settle(skillsResult, "Skill identification failed.");
+			const analysis = settle(analysisResult, "Resume analysis failed.");
 
-		if (mode === "text" && text.length > MAX_RESUME_TEXT_LENGTH) {
-			setError("Resume text must be 100,000 characters or fewer.");
-			return;
-		}
+			setResults({
+				text: text.value,
+				skills: skills.value ? (skills.value.skills ?? []) : null,
+				analysis: analysis.value,
+			});
+			setErrors({
+				text: text.error,
+				skills: skills.error,
+				analysis: analysis.error,
+			});
+			setLoading(false);
+		});
 
-		setBusy(true);
-		try {
-			if (mode === "file") {
-				await uploadResume(uid, file);
-				setMessage("Resume uploaded successfully!");
-				setExtractedText("");
-				setExtractedFileName("");
-				setAnalysis(null);
-			} else {
-				await saveResumeText(uid, text);
-				setMessage("Resume text saved successfully!");
-				setAnalysis(null);
-			}
-		} catch (uploadError) {
-			setError(
-				mode === "file"
-					? `Failed to upload file: ${uploadError.message}`
-					: `Failed to save text: ${uploadError.message}`,
-			);
-		} finally {
-			setBusy(false);
-		}
-	};
+		return () => {
+			cancelled = true;
+		};
+	}, [uid, reloadCount]);
 
-	const handleExtract = async () => {
-		setError("");
-		setMessage("");
-		setExtractedText("");
-		setExtractedFileName("");
-		setAnalysis(null);
+	if (!uid) {
+		return (
+			<div className="container mt-4 mb-5">
+				<h2 className="mb-3">Resume Dashboard</h2>
+				<p className="text-muted">Please sign in to see your dashboard.</p>
+			</div>
+		);
+	}
 
-		if (!uid) {
-			setError("Please sign in first.");
-			return;
-		}
+	if (loading) {
+		return (
+			<Loading
+				title="Building your dashboard…"
+				detail="Reading your resume and identifying skills. This can take a minute the first time."
+			/>
+		);
+	}
 
-		setExtracting(true);
-		try {
-			const result = await extractResumeText();
-			if (result.status !== "success") {
-				throw new Error("Resume extraction was unsuccessful.");
-			}
-
-			setExtractedText(result.text || "");
-			setExtractedFileName(result.fileName || "");
-			setMessage("Resume text extracted successfully!");
-		} catch (extractError) {
-			setError(`Failed to extract resume: ${extractError.message}`);
-		} finally {
-			setExtracting(false);
-		}
-	};
-
-	const handleAnalyze = async () => {
-		setError("");
-		setMessage("");
-		setAnalysis(null);
-
-		if (!uid) {
-			setError("Please sign in first.");
-			return;
-		}
-
-		setAnalyzing(true);
-		try {
-			const result = await analyzeResume();
-			if (result.status !== "success") {
-				throw new Error("Resume analysis was unsuccessful.");
-			}
-
-			setAnalysis(result);
-			setMessage("Resume analysis completed successfully!");
-		} catch (analysisError) {
-			setError(`Failed to analyze resume: ${analysisError.message}`);
-		} finally {
-			setAnalyzing(false);
-		}
-	};
+	const { text, skills, analysis } = results;
+	const nothingLoaded = !text && !skills && !analysis;
+	const advancedCount = skills?.filter((s) => s.level >= 4).length ?? 0;
+	const highestDegree = DEGREE_ORDER.find((degree) =>
+		analysis?.education?.includes(degree),
+	);
 
 	return (
 		<div className="container mt-4 mb-5">
-			<div className="card shadow-sm mx-auto" style={{ maxWidth: 750 }}>
-				<div className="card-header">Upload or Type Your Resume</div>
-				<div className="card-body">
-					{error && (
-						<div className="alert alert-danger py-2" role="alert">
-							{error}
-						</div>
-					)}
-					{message && (
-						<div className="alert alert-success py-2" role="status">
-							{message}
-						</div>
-					)}
-
-					<fieldset className="btn-group w-100 mb-4 border-0 p-0">
-						<legend className="visually-hidden">
-							Choose resume input method
-						</legend>
-						<input
-							type="radio"
-							className="btn-check"
-							id="btn-file"
-							autoComplete="off"
-							checked={mode === "file"}
-							onChange={() => setMode("file")}
-							disabled={isBusy}
-						/>
-						<label className="btn btn-outline-primary" htmlFor="btn-file">
-							Upload File
-						</label>
-
-						<input
-							type="radio"
-							className="btn-check"
-							id="btn-text"
-							autoComplete="off"
-							checked={mode === "text"}
-							onChange={() => setMode("text")}
-							disabled={isBusy}
-						/>
-						<label className="btn btn-outline-primary" htmlFor="btn-text">
-							Type Resume
-						</label>
-					</fieldset>
-
-					<form onSubmit={handleSubmit}>
-						{mode === "file" ? (
-							<div className="mb-3">
-								<label htmlFor="resumeFile" className="form-label">
-									Select PDF or DOCX (under 5 MB)
-								</label>
-								<input
-									className="form-control"
-									type="file"
-									id="resumeFile"
-									accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-									onChange={handleFileChange}
-									disabled={isBusy}
-								/>
-							</div>
-						) : (
-							<div className="mb-3">
-								<label htmlFor="resumeText" className="form-label">
-									Paste or Type Resume
-								</label>
-								<textarea
-									className="form-control"
-									id="resumeText"
-									rows="10"
-									maxLength={MAX_RESUME_TEXT_LENGTH}
-									value={text}
-									onChange={(event) => setText(event.target.value)}
-									placeholder="Paste your resume contents here..."
-									disabled={isBusy}
-								/>
-								<div className="form-text text-end">
-									{text.length.toLocaleString()} /{" "}
-									{MAX_RESUME_TEXT_LENGTH.toLocaleString()} characters
-								</div>
-							</div>
-						)}
-
-						<button
-							type="submit"
-							className="btn btn-primary w-100"
-							disabled={isBusy}
-						>
-							{busy ? "Saving..." : "Save Resume"}
-						</button>
-					</form>
-
-					<hr className="my-4" />
-					<h5>Resume Text Extraction</h5>
-					<p className="text-muted">
-						Extract text from your most recently uploaded PDF or DOCX resume.
-					</p>
-					<button
-						type="button"
-						className="btn btn-success w-100"
-						onClick={handleExtract}
-						disabled={isBusy}
-					>
-						{extracting ? "Extracting Resume Text..." : "Extract Resume Text"}
-					</button>
-
-					{extractedText && (
-						<div className="mt-4">
-							<h5>Extracted Resume</h5>
-							{extractedFileName && (
-								<p>
-									<strong>File:</strong> {extractedFileName}
-								</p>
-							)}
-							<div
-								className="border rounded p-3 bg-light"
-								style={{
-									whiteSpace: "pre-wrap",
-									overflowWrap: "anywhere",
-									maxHeight: 400,
-									overflowY: "auto",
-								}}
-							>
-								{extractedText}
-							</div>
-							<p className="text-muted mt-2">
-								Characters extracted: {extractedText.length.toLocaleString()}
-							</p>
-						</div>
-					)}
-
-					<hr className="my-4" />
-					<h5>Resume Analysis</h5>
-					<p className="text-muted">
-						Identify skills, education, experience, and occupations from your
-						most recently uploaded resume.
-					</p>
-					<button
-						type="button"
-						className="btn btn-primary w-100"
-						onClick={handleAnalyze}
-						disabled={isBusy}
-					>
-						{analyzing ? "Analyzing Resume..." : "Analyze Resume"}
-					</button>
-
-					{analysis && (
-						<div className="mt-4">
-							<h5>Analysis Results</h5>
-							<p>
-								<strong>File:</strong> {analysis.fileName}
-							</p>
-							<p>
-								<strong>Analysis method:</strong>{" "}
-								{analysis.analysisType === "rule-based"
-									? "Rule-based prototype"
-									: analysis.analysisType || "Unknown"}
-							</p>
-							<p>
-								<strong>Experience:</strong>{" "}
-								{analysis.yearsExperience != null
-									? `${analysis.yearsExperience} years mentioned`
-									: "Not identified"}
-							</p>
-
-							<h6>Identified Skills</h6>
-							{analysis.skills?.length > 0 ? (
-								<div className="mb-3">
-									{analysis.skills.map((skill) => (
-										<span key={skill} className="badge bg-secondary me-2 mb-2">
-											{skill}
-										</span>
-									))}
-								</div>
-							) : (
-								<p className="text-muted">
-									No skills matched the current catalog.
-								</p>
-							)}
-
-							<h6>Education Mentioned</h6>
-							{analysis.education?.length > 0 ? (
-								<ul>
-									{analysis.education.map((degree) => (
-										<li key={degree}>{degree}</li>
-									))}
-								</ul>
-							) : (
-								<p className="text-muted">No degree keywords identified.</p>
-							)}
-
-							<h6>Occupations Mentioned</h6>
-							{analysis.possibleOccupations?.length > 0 ? (
-								<ul>
-									{analysis.possibleOccupations.map((occupation) => (
-										<li key={occupation}>{occupation}</li>
-									))}
-								</ul>
-							) : (
-								<p className="text-muted">
-									No occupations matched the current catalog.
-								</p>
-							)}
-
-							<div className="alert alert-info mt-3">
-								This is preliminary keyword-based analysis, not an AI-generated
-								career recommendation. Review the results for accuracy.
-							</div>
+			<div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+				<div>
+					<h2 className="mb-0">Resume Dashboard</h2>
+					{text && (
+						<div className="text-muted small">
+							{text.fileName} · {text.characterCount?.toLocaleString()}{" "}
+							characters
 						</div>
 					)}
 				</div>
+				<div className="d-flex gap-2">
+					<Link
+						to="/resume"
+						state={{ replace: true }}
+						className="btn btn-outline-secondary"
+					>
+						Update resume
+					</Link>
+					<button
+						type="button"
+						className="btn btn-outline-primary"
+						onClick={() => setReloadCount((n) => n + 1)}
+					>
+						Refresh
+					</button>
+				</div>
 			</div>
+
+			{nothingLoaded ? (
+				// All three failed (usually: no resume uploaded yet), so show one message.
+				<>
+					<SectionError
+						message={
+							errors.text || errors.skills || errors.analysis || "No results."
+						}
+					/>
+					<Link
+						to="/resume"
+						state={{ replace: true }}
+						className="btn btn-primary mt-3"
+					>
+						Upload or type a resume
+					</Link>
+				</>
+			) : (
+				<>
+					{/* Summary tiles */}
+					<div className="row g-3 mb-4">
+						<StatCard label="Skills identified" value={skills?.length ?? "—"} />
+						<StatCard
+							label="Advanced or expert"
+							value={skills ? advancedCount : "—"}
+							hint="estimated"
+						/>
+						<StatCard
+							label="Experience"
+							value={
+								analysis?.yearsExperience != null
+									? `${analysis.yearsExperience} yrs`
+									: "—"
+							}
+						/>
+						<StatCard label="Highest education" value={highestDegree ?? "—"} />
+					</div>
+
+					{/* Skills */}
+					<div className="card shadow-sm mb-4">
+						<div className="card-header">Skills</div>
+						<div className="card-body">
+							{errors.skills ? (
+								<SectionError message={errors.skills} />
+							) : skills.length === 0 ? (
+								<p className="text-muted mb-0">No skills identified.</p>
+							) : (
+								<>
+									<div className="table-responsive">
+										<table className="table table-sm align-middle mb-0">
+											<thead>
+												<tr>
+													<th>Skill</th>
+													<th>Category</th>
+													<th style={{ width: "45%" }}>Estimated level</th>
+												</tr>
+											</thead>
+											<tbody>
+												{skills.map((skill) => (
+													<tr key={skill.skillId}>
+														<td title={skill.evidence?.join("\n")}>
+															{skill.name}
+														</td>
+														<td className="text-muted">
+															{formatCategory(skill.category)}
+														</td>
+														<td>
+															<div className="d-flex align-items-center gap-2">
+																<div
+																	className="progress flex-grow-1"
+																	style={{ height: 8 }}
+																	role="progressbar"
+																	aria-label={`${skill.name} level`}
+																	aria-valuenow={skill.level}
+																	aria-valuemin={0}
+																	aria-valuemax={5}
+																>
+																	<div
+																		className="progress-bar"
+																		style={{ width: `${skill.level * 20}%` }}
+																	/>
+																</div>
+																<small
+																	className="text-muted"
+																	style={{ minWidth: 90 }}
+																>
+																	{LEVEL_LABELS[skill.level] ?? skill.level}
+																</small>
+															</div>
+														</td>
+													</tr>
+												))}
+											</tbody>
+										</table>
+									</div>
+									<p className="text-muted small mt-3 mb-0">
+										Levels are estimated from how each skill is described in
+										your resume. Hover over a skill to see where it was found.
+									</p>
+								</>
+							)}
+						</div>
+					</div>
+
+					{/* Education and occupations */}
+					<div className="row g-3 mb-4">
+						<div className="col-md-6">
+							<div className="card shadow-sm h-100">
+								<div className="card-header">Education Mentioned</div>
+								<div className="card-body">
+									{errors.analysis ? (
+										<SectionError message={errors.analysis} />
+									) : analysis.education?.length > 0 ? (
+										<ul className="mb-0">
+											{analysis.education.map((degree) => (
+												<li key={degree}>{degree}</li>
+											))}
+										</ul>
+									) : (
+										<p className="text-muted mb-0">No degrees identified.</p>
+									)}
+								</div>
+							</div>
+						</div>
+						<div className="col-md-6">
+							<div className="card shadow-sm h-100">
+								<div className="card-header">Occupations Mentioned</div>
+								<div className="card-body">
+									{errors.analysis ? (
+										<SectionError message={errors.analysis} />
+									) : analysis.possibleOccupations?.length > 0 ? (
+										<ul className="mb-0">
+											{analysis.possibleOccupations.map((occupation) => (
+												<li key={occupation}>{occupation}</li>
+											))}
+										</ul>
+									) : (
+										<p className="text-muted mb-0">
+											No occupations identified.
+										</p>
+									)}
+								</div>
+							</div>
+						</div>
+					</div>
+
+					{/* Extracted text */}
+					<div className="card shadow-sm">
+						<div className="card-header">Resume Text</div>
+						<div className="card-body">
+							{errors.text ? (
+								<SectionError message={errors.text} />
+							) : (
+								<details>
+									<summary>Show extracted text</summary>
+									<div
+										className="border rounded p-3 bg-light mt-3"
+										style={{
+											whiteSpace: "pre-wrap",
+											overflowWrap: "anywhere",
+											maxHeight: 400,
+											overflowY: "auto",
+										}}
+									>
+										{text.text}
+									</div>
+								</details>
+							)}
+						</div>
+					</div>
+				</>
+			)}
 		</div>
 	);
 };
 
-export default ResumeUpload;
+export default ResumeDashboard;

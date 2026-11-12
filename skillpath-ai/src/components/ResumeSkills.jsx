@@ -1,20 +1,24 @@
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSelector } from "react-redux";
 import "../backend/firebase.jsx"; // makes sure the Firebase app is initialized
 
 /**
- * Shows only the skills identified in the signed-in user's uploaded resume.
+ * Skills page: shows the skills identified in the signed-in user's uploaded resume.
  *
- * Pass a new `refreshKey` (e.g. a timestamp) after a fresh upload to re-run it.
+ * Pass a new `refreshKey` (e.g. a timestamp) after a fresh upload to re-run it,
+ * or use the Refresh button.
  */
 const ResumeSkills = ({ refreshKey }) => {
 	const uid = useSelector((state) => state.authedUser);
 	const [skills, setSkills] = useState([]);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState("");
+	const [reloadCount, setReloadCount] = useState(0);
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey intentionally triggers a reload after upload.
+	const refresh = useCallback(() => setReloadCount((n) => n + 1), []);
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey and reloadCount intentionally trigger a reload.
 	useEffect(() => {
 		if (!uid) {
 			setSkills([]);
@@ -30,7 +34,10 @@ const ResumeSkills = ({ refreshKey }) => {
 				if (!cancelled) setSkills(data?.skills ?? []);
 			})
 			.catch((err) => {
-				if (!cancelled) setError(err.message);
+				if (!cancelled) {
+					setSkills([]);
+					setError(err.message);
+				}
 			})
 			.finally(() => {
 				if (!cancelled) setLoading(false);
@@ -39,16 +46,32 @@ const ResumeSkills = ({ refreshKey }) => {
 		return () => {
 			cancelled = true;
 		};
-	}, [uid, refreshKey]);
-
-	if (!uid) return null;
+	}, [uid, refreshKey, reloadCount]);
 
 	return (
 		<div className="container mt-4 mb-5">
+			<h2 className="text-center mb-4">My Skills</h2>
 			<div className="card shadow-sm mx-auto" style={{ maxWidth: 750 }}>
-				<div className="card-header">Identified Skills</div>
+				<div className="card-header d-flex justify-content-between align-items-center">
+					<span>
+						Identified Skills
+						{!loading && skills.length > 0 && ` (${skills.length})`}
+					</span>
+					{uid && (
+						<button
+							type="button"
+							className="btn btn-sm btn-outline-primary"
+							onClick={refresh}
+							disabled={loading}
+						>
+							Refresh
+						</button>
+					)}
+				</div>
 				<div className="card-body">
-					{loading ? (
+					{!uid ? (
+						<p className="text-muted mb-0">Please sign in to see your skills.</p>
+					) : loading ? (
 						<p className="text-muted mb-0">Identifying skills…</p>
 					) : error ? (
 						<div className="alert alert-danger py-2 mb-0" role="alert">
@@ -66,7 +89,9 @@ const ResumeSkills = ({ refreshKey }) => {
 							))}
 						</div>
 					) : (
-						<p className="text-muted mb-0">No skills identified.</p>
+						<p className="text-muted mb-0">
+							No skills identified. Upload your resume first, then press Refresh.
+						</p>
 					)}
 				</div>
 			</div>

@@ -23,14 +23,14 @@ import {
 } from "firebase/storage";
 
 const firebaseConfig = {
-	apiKey: "AIzaSyCe3SDg7jbMIhKT_6XIMhyUeHxtwUU9AFA",
-	authDomain: "mynotes-ae8c6.firebaseapp.com",
-	databaseURL: "https://mynotes-ae8c6-default-rtdb.firebaseio.com",
-	projectId: "mynotes-ae8c6",
-	storageBucket: "mynotes-ae8c6.firebasestorage.app",
-	messagingSenderId: "195557582263",
-	appId: "1:195557582263:web:a303478baeb642b60af432",
-	measurementId: "G-CDNQ1PFJDN",
+	apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+	authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+	databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
+	projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+	storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+	messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+	appId: import.meta.env.VITE_FIREBASE_APP_ID,
+	measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
 const app = initializeApp(firebaseConfig);
@@ -197,6 +197,7 @@ export async function uploadResume(uid, file) {
 		throw new Error("Resume must be smaller than 5 MB.");
 	}
 
+
 	const filePath = `resume/${uid}/`;
 	const storageRef = storageRefs(storage, filePath);
 	const metadata = {
@@ -212,6 +213,8 @@ export async function uploadResume(uid, file) {
 			[`users/${uid}/resumePath`]: snapshot.ref.fullPath,
 			[`users/${uid}/resumeFileName`]: file.name,
 			[`users/${uid}/resumeContentType`]: contentType,
+			// The newest resume wins: drop any typed resume so the functions read this file.
+			[`users/${uid}/resumeText`]: null,
 		});
 	} catch (error) {
 		await deleteObject(snapshot.ref).catch((cleanupError) => {
@@ -276,6 +279,18 @@ export async function extractResumeText() {
 
 	await user.getIdToken();
 	const callable = httpsCallable(functions, "extract_resume_text");
+	const result = await callable({});
+	return result.data;
+}
+
+export async function identifyResumeSkills() {
+	const user = auth.currentUser;
+	if (!user) {
+		throw new Error("Please sign in first.");
+	}
+
+	await user.getIdToken();
+	const callable = httpsCallable(functions, "identify_resume_skills");
 	const result = await callable({});
 	return result.data;
 }

@@ -13,6 +13,7 @@ import { handleInitialData } from "../actions/shared.jsx";
 import { auth } from "../backend/firebase.jsx";
 import Login from "./Login.jsx";
 import NewUser from "./NewUser.jsx";
+import ResumeDashboard from "./ResumeDashboard.jsx";
 import ResumeSkills from "./ResumeSkills.jsx";
 import ResumeUpload from "./ResumeUpload.jsx";
 import Toolbar from "./Toolbar.jsx";
@@ -78,6 +79,7 @@ function App({ authedUser, loaded, dispatch }) {
 			<Routes>
 				<Route path="/resume" element={<ResumeUpload />} />
 				<Route path="/skills" element={<ResumeSkills />} />
+				<Route path="/dashboard" element={<ResumeDashboard />} />
 				<Route path="*" element={<Navigate to="/resume" replace />} />
 			</Routes>
 		</div>
