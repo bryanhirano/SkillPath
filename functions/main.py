@@ -6,7 +6,7 @@ import re
 import zipfile
 
 from docx import Document
-from firebase_admin import initialize_app, storage
+from firebase_admin import db, initialize_app, storage
 from firebase_functions import https_fn
 from firebase_functions.options import set_global_options
 from google.api_core.exceptions import NotFound
@@ -179,8 +179,26 @@ def _extract_document_text(file_bytes):
     return file_type, text
 
 
+def _load_typed_resume(uid):
+    """Return the user's typed resume text, or None if they have not typed one.
+
+    The web app clears ``users/<uid>/resumeText`` whenever a file is uploaded,
+    so a typed resume here is always newer than any uploaded file.
+    """
+    typed_text = db.reference(f"users/{uid}/resumeText").get()
+    if not isinstance(typed_text, str) or not typed_text.strip():
+        return None
+    typed_text = typed_text.strip()
+    if len(typed_text) > MAX_TEXT_LENGTH:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="Resume text exceeds the 100,000 character limit.",
+        )
+    return typed_text
+
+
 def _load_resume_text(uid):
-    """Load and extract the authenticated user's uploaded resume.
+    """Load the authenticated user's resume: typed text, else the uploaded file.
 
     Args:
         uid: Firebase Authentication UID of the resume owner.
@@ -192,6 +210,10 @@ def _load_resume_text(uid):
         https_fn.HttpsError: If the file is missing, invalid, or its contents
             cannot be extracted.
     """
+    typed_text = _load_typed_resume(uid)
+    if typed_text:
+        return "Typed resume", typed_text
+
     file_path = _resume_path(uid)
 
     try:
