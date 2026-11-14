@@ -2,6 +2,7 @@ firebase-functions
 firebase-admin
 pypdf
 python-docx
+python-dotenv
 # Optional BERT skill tagger (needs ~2 GB memory on the function):
 # transformers
 # torch
