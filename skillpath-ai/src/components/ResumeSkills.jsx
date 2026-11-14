@@ -70,7 +70,9 @@ const ResumeSkills = ({ refreshKey }) => {
 				</div>
 				<div className="card-body">
 					{!uid ? (
-						<p className="text-muted mb-0">Please sign in to see your skills.</p>
+						<p className="text-muted mb-0">
+							Please sign in to see your skills.
+						</p>
 					) : loading ? (
 						<p className="text-muted mb-0">Identifying skills…</p>
 					) : error ? (
@@ -90,7 +92,8 @@ const ResumeSkills = ({ refreshKey }) => {
 						</div>
 					) : (
 						<p className="text-muted mb-0">
-							No skills identified. Upload your resume first, then press Refresh.
+							No skills identified. Upload your resume first, then press
+							Refresh.
 						</p>
 					)}
 				</div>
