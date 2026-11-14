@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Protocol
 
+
 from .catalog import Catalog, normalize_text
 
 log = logging.getLogger(__name__)
@@ -129,6 +130,7 @@ class BertSpanTagger:  # pylint: disable=too-few-public-methods
 
 
 
+
 def decode_bio(sentence: str, tokens: list[dict]) -> list[tuple[str, float]]:
     """Combine BERT token predictions into complete skill phrases."""
     results = []
@@ -146,9 +148,7 @@ def decode_bio(sentence: str, tokens: list[dict]) -> list[tuple[str, float]]:
             results.append((phrase, confidence))
 
     for token in sorted(tokens, key=lambda t: t.get("start") or 0):
-        label = str(token.get("entity", "O")).upper()
-        label = label.split("-", 1)[0]
-
+        label = str(token.get("entity", "O")).upper().split("-", 1)[0]
         start = token.get("start")
         end = token.get("end")
 
@@ -167,27 +167,44 @@ def decode_bio(sentence: str, tokens: list[dict]) -> list[tuple[str, float]]:
 
         score = float(token.get("score", 0.0))
 
-        if label == "B" or current_start is None:
-            save_span()
+        if current_start is None:
             current_start = start
             current_end = end
             current_scores = [score]
             continue
 
-        # Continue only if the next token belongs to the same phrase.
-        gap = sentence[current_end:start]
+        # Join subword tokens even when BERT incorrectly labels them B.
+        # Examples: S + ##QL = SQL, Re + ##act = React.
+        same_word = (
+            start == current_end
+            and (
+                str(token.get("word", "")).startswith("##")
+                or sentence[start:end] in ("+", "#")
+            )
+        )
 
-        if start >= current_end and not gap.strip():
+        if same_word:
             current_end = end
             current_scores.append(score)
-        else:
-            save_span()
-            current_start = start
+            continue
+
+        # Continue multiword phrases when BERT uses the I label.
+        gap = sentence[current_end:start]
+
+        if label == "I" and start >= current_end and not gap.strip():
             current_end = end
-            current_scores = [score]
+            current_scores.append(score)
+            continue
+
+        # Otherwise, start a new entity.
+        save_span()
+        current_start = start
+        current_end = end
+        current_scores = [score]
 
     save_span()
     return results
+
 
 
 
