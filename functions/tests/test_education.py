@@ -133,3 +133,24 @@ University of Maryland
     assert records[0]["degree_level"] == "bachelor"
     assert records[0]["field"] == "Computer Science"
     assert records[0]["institution"] == "University of Maryland"
+
+
+def test_university_and_expected_date_before_degree():
+    resume = """
+EDUCATION
+UNIVERSITY OF MARYLAND GLOBAL CAMPUS    Expected Graduation: Dec 2026
+Bachelor of Science in Computer Science
+Relevant Coursework: Data Structures and Algorithms
+
+TECHNICAL SKILLS
+Python, Java, SQL
+"""
+    records = extract_education(resume)
+
+    assert len(records) == 1
+    assert records[0]["degree_level"] == "bachelor"
+    assert records[0]["degree"] == "Bachelor of Science"
+    assert records[0]["field"] == "Computer Science"
+    assert records[0]["institution"] == "UNIVERSITY OF MARYLAND GLOBAL CAMPUS"
+    assert records[0]["graduation_status"] == "expected"
+    assert records[0]["graduation_date"] == "Dec 2026"

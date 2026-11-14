@@ -131,6 +131,7 @@ def extract_education(text: str) -> list[dict]:
         # Find the beginning of this education entry.
         start = index
 
+
         while start > 0:
             previous = lines[start - 1]
 
@@ -140,14 +141,25 @@ def extract_education(text: str) -> list[dict]:
             if find_degree(previous):
                 break
 
+            # Stop at graduation details belonging to an earlier degree.
             if re.search(
-                r"\b(?:graduated|expected|anticipated)\b",
+                r"\b(?:graduated|completed|conferred)\b",
                 previous,
                 re.IGNORECASE,
             ):
                 break
 
+            # Stop before a previous institution if another
+            # institution already belongs to this entry.
+            if INSTITUTION_PATTERN.search(previous):
+                if any(
+                    INSTITUTION_PATTERN.search(lines[pos])
+                    for pos in range(start, index + 1)
+                ):
+                    break
+
             start -= 1
+
 
         # Find the end of this education entry.
         end = index
@@ -183,7 +195,6 @@ def extract_education(text: str) -> list[dict]:
 
         # Extract field of study.
         degree_suffix = line[match.end():]
-
         degree_suffix = re.sub(
             r"^\s+of\s+"
             r"(?:Science|Arts|Engineering|Business Administration)\b",
@@ -191,21 +202,24 @@ def extract_education(text: str) -> list[dict]:
             degree_suffix,
             flags=re.IGNORECASE,
         )
-
         field_match = FIELD_PATTERN.search(degree_suffix)
 
-        # Extract institution from individual lines.
-        institution_match = next(
-            (
-                institution
-                for entry_line in entry_lines
-                for institution in [
-                    INSTITUTION_PATTERN.search(entry_line)
-                ]
-                if institution
-            ),
-            None,
-        )
+        # Extract institution without including graduation details.
+        institution_match = None
+
+        for entry_line in entry_lines:
+            clean_line = re.split(
+                r"\s{2,}|\b(?:Expected Graduation|Graduation Date|"
+                r"Graduated|Anticipated Graduation)\s*:",
+                entry_line,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0]
+
+            institution_match = INSTITUTION_PATTERN.search(clean_line)
+
+            if institution_match:
+                break
 
         # Extract graduation date.
         date_match = DATE_PATTERN.search(context)
@@ -218,22 +232,23 @@ def extract_education(text: str) -> list[dict]:
         else:
             status = "unknown"
 
+        degree_match = re.match(
+            r"(?:Bachelor|Master|Associate|Doctor)(?:'s)?"
+            r"(?:\s+of\s+(?:Science|Arts|Engineering|Business Administration))?",
+            line[match.start():],
+            re.IGNORECASE,
+        )
+
         record = EducationRecord(
             degree_level=level,
-            degree=match.group(0),
-            field=(
-                field_match.group(1).strip()
-                if field_match else None
-            ),
+            degree=degree_match.group(0) if degree_match else match.group(0),
+            field=field_match.group(1).strip() if field_match else None,
             institution=(
                 institution_match.group(1).strip()
                 if institution_match else None
             ),
             graduation_status=status,
-            graduation_date=(
-                date_match.group(0)
-                if date_match else None
-            ),
+            graduation_date=date_match.group(0) if date_match else None,
         )
 
         key = (level, line.lower())
