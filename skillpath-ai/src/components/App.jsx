@@ -17,6 +17,7 @@ import ResumeDashboard from "./ResumeDashboard.jsx";
 import ResumeSkills from "./ResumeSkills.jsx";
 import ResumeUpload from "./ResumeUpload.jsx";
 import Toolbar from "./Toolbar.jsx";
+import Training from "./Training.jsx";
 
 library.add(faBars);
 
@@ -80,6 +81,7 @@ function App({ authedUser, loaded, dispatch }) {
 				<Route path="/resume" element={<ResumeUpload />} />
 				<Route path="/skills" element={<ResumeSkills />} />
 				<Route path="/dashboard" element={<ResumeDashboard />} />
+				<Route path="/training" element={<Training />} />
 				<Route path="*" element={<Navigate to="/resume" replace />} />
 			</Routes>
 		</div>

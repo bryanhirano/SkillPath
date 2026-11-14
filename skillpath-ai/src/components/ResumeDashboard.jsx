@@ -1,16 +1,19 @@
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
 	analyzeResume,
 	extractResumeText,
 	identifyResumeSkills,
 } from "../backend/firebase.jsx";
+import { deleteCurrentResume } from "../backend/resumeStorage.js";
 import Loading from "./Loading.jsx";
 
 /**
  * Resume dashboard: runs extract_resume_text, identify_resume_skills and
  * analyze_resume together for the signed-in user and shows the results.
+ * "Update resume" deletes the current resume before opening the upload page.
  */
 
 const LEVEL_LABELS = [
@@ -27,7 +30,16 @@ const DEGREE_ORDER = [
 	"Bachelor's Degree",
 	"Associate Degree",
 ];
-const EMPTY_RESULTS = { text: null, skills: null, analysis: null };
+const EMPTY_RESULTS = { text: null, skills: null, analysis: null, target: null };
+
+// Saved target job + latest gap analysis (written by the Skills page).
+const loadTargetJob = () =>
+	httpsCallable(getFunctions(), "list_target_roles")()
+		.then(({ data }) => data)
+		.catch((err) => {
+			console.error("list_target_roles failed:", err);
+			throw new Error("Your target job couldn't be loaded. Press Refresh to try again.");
+		});
 
 const formatCategory = (category) =>
 	category ? category.charAt(0).toUpperCase() + category.slice(1) : "Other";
@@ -61,6 +73,128 @@ const SectionError = ({ message }) => (
 	</div>
 );
 
+const GAP_BADGE = { missing: "bg-danger", partial: "bg-warning text-dark" };
+
+// The job the user is aiming for, chosen on the Skills page.
+const TargetJobCard = ({ target, error }) => {
+	const saved = target?.savedTarget;
+	const latest = target?.latestAnalysis;
+	const role = saved?.roleId
+		? target.roles?.find((r) => r.id === saved.roleId)
+		: null;
+	const title = saved?.resolvedTitle || role?.title || saved?.title;
+	// Only show the analysis if it was made for the job currently selected.
+	const analysis =
+		latest && title && latest.target?.title === title ? latest : null;
+	const readiness = analysis ? Math.round(analysis.readiness ?? 0) : null;
+	const gaps = analysis?.gaps ?? [];
+
+	return (
+		<div className="card shadow-sm mb-4">
+			<div className="card-header d-flex justify-content-between align-items-center">
+				<span>Target Job</span>
+				<Link to="/skills" className="btn btn-sm btn-outline-primary">
+					{saved ? "Change target job" : "Choose a target job"}
+				</Link>
+			</div>
+			<div className="card-body">
+				{error ? (
+					<SectionError message={error} />
+				) : !saved ? (
+					<p className="text-muted mb-0">
+						You haven't chosen a job to aim for yet. Pick one on the Skills
+						page to see how your skills compare.
+					</p>
+				) : (
+					<>
+						<div className="d-flex flex-wrap justify-content-between align-items-baseline gap-2 mb-2">
+							<div>
+								<div className="fs-5 fw-semibold">{title}</div>
+								<div className="text-muted small">
+									{saved.custom
+										? "From a pasted job description"
+										: role?.onetCode
+											? `O*NET ${role.onetCode}${role.onetTitle ? ` · ${role.onetTitle}` : ""}`
+											: "SkillPath role"}
+								</div>
+							</div>
+							{readiness !== null && (
+								<div className="text-end">
+									<div className="fs-4 fw-semibold">{readiness}%</div>
+									<div className="text-muted small">ready</div>
+								</div>
+							)}
+						</div>
+
+						{analysis ? (
+							<>
+								<div
+									className="progress mb-3"
+									style={{ height: 8 }}
+									role="progressbar"
+									aria-label="Readiness"
+									aria-valuenow={readiness}
+									aria-valuemin={0}
+									aria-valuemax={100}
+								>
+									<div
+										className="progress-bar bg-success"
+										style={{ width: `${readiness}%` }}
+									/>
+								</div>
+								{gaps.length > 0 ? (
+									<>
+										<div className="small text-muted mb-1">
+											Skills to build
+										</div>
+										<ul className="list-unstyled mb-0">
+											{gaps.slice(0, 5).map((gap) => (
+												<li
+													key={gap.skillId}
+													className="d-flex justify-content-between border-bottom py-1"
+												>
+													<span>{gap.name}</span>
+													<span className="small">
+														<span className="text-muted me-2">
+															{gap.currentLabel} → {gap.requiredLabel}
+														</span>
+														<span
+															className={`badge ${GAP_BADGE[gap.status] ?? "bg-secondary"}`}
+														>
+															{gap.status}
+														</span>
+													</span>
+												</li>
+											))}
+										</ul>
+										{gaps.length > 5 && (
+											<div className="small text-muted mt-2">
+												+{gaps.length - 5} more on the Skills page
+											</div>
+										)}
+										<Link to="/training" className="btn btn-success btn-sm mt-3">
+											View training plan
+										</Link>
+									</>
+								) : (
+									<p className="mb-0">
+										You meet every requirement for this job.
+									</p>
+								)}
+							</>
+						) : (
+							<p className="text-muted mb-0">
+								No comparison yet. Open the Skills page and press "Update
+								target job" to compare your skills with this job.
+							</p>
+						)}
+					</>
+				)}
+			</div>
+		</div>
+	);
+};
+
 const ResumeDashboard = () => {
 	const uid = useSelector((state) => state.authedUser);
 	const [results, setResults] = useState(EMPTY_RESULTS);
@@ -68,6 +202,26 @@ const ResumeDashboard = () => {
 	// Start in the loading state so the page never flashes "No results" before the first run.
 	const [loading, setLoading] = useState(true);
 	const [reloadCount, setReloadCount] = useState(0);
+	const navigate = useNavigate();
+	const [confirmingDelete, setConfirmingDelete] = useState(false);
+	const [deleting, setDeleting] = useState(false);
+	const [deleteError, setDeleteError] = useState("");
+
+	// "Update resume": delete the current resume (file, its path key and any
+	// typed text), then go to the upload page for the new one.
+	const replaceResume = async () => {
+		setDeleting(true);
+		setDeleteError("");
+		try {
+			await deleteCurrentResume(uid);
+			navigate("/resume", { state: { replaced: true } });
+		} catch (err) {
+			setDeleteError(
+				`Your current resume couldn't be deleted${err?.code ? ` (${err.code})` : ""}. Please try again.`,
+			);
+			setDeleting(false);
+		}
+	};
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: reloadCount intentionally triggers a reload.
 	useEffect(() => {
@@ -86,21 +240,25 @@ const ResumeDashboard = () => {
 			extractResumeText(),
 			identifyResumeSkills(),
 			analyzeResume(),
-		]).then(([textResult, skillsResult, analysisResult]) => {
+			loadTargetJob(),
+		]).then(([textResult, skillsResult, analysisResult, targetResult]) => {
 			if (cancelled) return;
 			const text = settle(textResult, "Resume text extraction failed.");
 			const skills = settle(skillsResult, "Skill identification failed.");
 			const analysis = settle(analysisResult, "Resume analysis failed.");
+			const target = settle(targetResult, "Your target job couldn't be loaded.");
 
 			setResults({
 				text: text.value,
 				skills: skills.value ? (skills.value.skills ?? []) : null,
 				analysis: analysis.value,
+				target: target.value,
 			});
 			setErrors({
 				text: text.error,
 				skills: skills.error,
 				analysis: analysis.error,
+				target: target.error,
 			});
 			setLoading(false);
 		});
@@ -128,7 +286,7 @@ const ResumeDashboard = () => {
 		);
 	}
 
-	const { text, skills, analysis } = results;
+	const { text, skills, analysis, target } = results;
 	const nothingLoaded = !text && !skills && !analysis;
 	const advancedCount = skills?.filter((s) => s.level >= 4).length ?? 0;
 	const highestDegree = DEGREE_ORDER.find((degree) =>
@@ -148,22 +306,58 @@ const ResumeDashboard = () => {
 					)}
 				</div>
 				<div className="d-flex gap-2">
-					<Link
-						to="/resume"
-						state={{ replace: true }}
+					<button
+						type="button"
 						className="btn btn-outline-secondary"
+						onClick={() => setConfirmingDelete(true)}
+						disabled={deleting || confirmingDelete}
 					>
 						Update resume
-					</Link>
+					</button>
 					<button
 						type="button"
 						className="btn btn-outline-primary"
 						onClick={() => setReloadCount((n) => n + 1)}
+						disabled={deleting}
 					>
 						Refresh
 					</button>
 				</div>
 			</div>
+
+			{confirmingDelete && (
+				<div
+					className="alert alert-warning d-flex flex-wrap justify-content-between align-items-center gap-2"
+					role="alert"
+				>
+					<span>
+						Updating deletes your current resume. You'll then upload or type a
+						new one.
+					</span>
+					<div className="d-flex gap-2">
+						<button
+							type="button"
+							className="btn btn-sm btn-outline-secondary"
+							onClick={() => {
+								setConfirmingDelete(false);
+								setDeleteError("");
+							}}
+							disabled={deleting}
+						>
+							Cancel
+						</button>
+						<button
+							type="button"
+							className="btn btn-sm btn-danger"
+							onClick={replaceResume}
+							disabled={deleting}
+						>
+							{deleting ? "Deleting…" : "Delete and continue"}
+						</button>
+					</div>
+				</div>
+			)}
+			{deleteError && <SectionError message={deleteError} />}
 
 			{nothingLoaded ? (
 				// All three failed (usually: no resume uploaded yet), so show one message.
@@ -173,11 +367,7 @@ const ResumeDashboard = () => {
 							errors.text || errors.skills || errors.analysis || "No results."
 						}
 					/>
-					<Link
-						to="/resume"
-						state={{ replace: true }}
-						className="btn btn-primary mt-3"
-					>
+					<Link to="/resume" className="btn btn-primary mt-3">
 						Upload or type a resume
 					</Link>
 				</>
@@ -201,6 +391,8 @@ const ResumeDashboard = () => {
 						/>
 						<StatCard label="Highest education" value={highestDegree ?? "—"} />
 					</div>
+
+					<TargetJobCard target={target} error={errors.target} />
 
 					{/* Skills */}
 					<div className="card shadow-sm mb-4">
