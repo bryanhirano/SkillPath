@@ -13,7 +13,11 @@ from google.api_core.exceptions import NotFound
 from pypdf import PdfReader
 
 from skillpath.catalog import load_catalog
-from skillpath.extraction import extract_skills, get_default_tagger
+from skillpath.extraction import (
+    apply_level_overrides,
+    extract_skills,
+    get_default_tagger,
+)
 from skillpath.text_extract import clean_text
 
 PROJECT_ID = "mynotes-ae8c6"
@@ -249,6 +253,20 @@ def _load_resume_text(uid):
     return f"resume.{file_type}", extracted_text
 
 
+def _load_level_overrides(uid):
+    """Return the skill levels the user set themselves ({skillId: level}).
+
+    Written by the Skills page to ``users/<uid>/skillLevels``. A read failure
+    only means estimates are shown, so it is logged rather than raised.
+    """
+    try:
+        overrides = db.reference(f"users/{uid}/skillLevels").get()
+    except Exception:  # pylint: disable=broad-exception-caught
+        logging.exception("Could not read skill level overrides.")
+        return {}
+    return overrides if isinstance(overrides, dict) else {}
+
+
 @https_fn.on_call()
 def extract_resume_text(request: https_fn.CallableRequest):
     """Return extracted text from the authenticated caller's uploaded resume.
@@ -291,9 +309,14 @@ def identify_resume_skills(request: https_fn.CallableRequest):
     Args:
         request: The Firebase callable request, including authentication data.
 
+    Levels the user set on the Skills page (``users/<uid>/skillLevels``)
+    replace the estimates.
+
     Returns:
         A mapping with success status and the identified skills, each with
-        ``skillId``, ``name``, ``category``, estimated ``level`` (1-5) and
+        ``skillId``, ``name``, ``category``, ``level`` (0-5, the user's own
+        value if they set one), ``estimatedLevel``, ``userSet``,
+        ``levelReasons`` (how the estimate was made), ``evidence`` and
         ``confidence``.
 
     Raises:
@@ -321,9 +344,12 @@ def identify_resume_skills(request: https_fn.CallableRequest):
             message="Skill identification failed.",
         ) from error
 
+    skills = apply_level_overrides(
+        result["skills"], _load_level_overrides(request.auth.uid)
+    )
     return {
         "status": "success",
-        "skills": result["skills"],
+        "skills": skills,
     }
 
 
