@@ -3,7 +3,7 @@ import unittest
 from dataclasses import asdict
 from unittest.mock import patch
 
-from onet_job_profiler import (
+from skillpath.onet_job_profiler import (
     EducationEntry,
     JobEngine,
     Knowledge,

@@ -1,343 +1,355 @@
+import { get, getDatabase, ref as dbRef, set } from "firebase/database";
+import { uploadBytesResumable } from "firebase/storage";
 import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-	analyzeResume,
-	extractResumeText,
-	identifyResumeSkills,
-} from "../backend/firebase.jsx";
-import Loading from "./Loading.jsx";
+	deleteResumeFile,
+	RESUME_PATH_KEY,
+	resumeFileRef,
+} from "../backend/resumeStorage.js";
 
 /**
- * Resume dashboard: runs extract_resume_text, identify_resume_skills and
- * analyze_resume together for the signed-in user and shows the results.
+ * Resume upload page: upload a PDF or Word file, or type/paste the resume.
+ *
+ * Matches what the Cloud Functions in functions/main.py read:
+ * - uploaded file -> Storage object `resume/{uid}` (no extension; the server
+ *   detects PDF or DOCX from the file contents)
+ * - typed resume  -> Realtime Database `users/{uid}/resumeText`
+ *
+ * A user has one resume at a time. Submitting a new one deletes the old one:
+ * - new file  -> overwrites `resume/{uid}` and deletes any typed resume
+ * - new text  -> saved, then the uploaded file `resume/{uid}` is deleted
+ * The old resume is only removed once the new one is safely stored, so a
+ * failed upload never leaves the user with no resume at all.
  */
 
-const LEVEL_LABELS = [
-	"None",
-	"Awareness",
-	"Beginner",
-	"Intermediate",
-	"Advanced",
-	"Expert",
-];
-const DEGREE_ORDER = [
-	"Doctorate",
-	"Master's Degree",
-	"Bachelor's Degree",
-	"Associate Degree",
-];
-const EMPTY_RESULTS = { text: null, skills: null, analysis: null };
+const MAX_FILE_BYTES = 5 * 1024 * 1024; // server rejects files of 5 MB or more
+const MAX_TEXT_CHARS = 100_000; // server limit for typed resumes
+const MIN_TEXT_CHARS = 50;
+const ACCEPT =
+	".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-const formatCategory = (category) =>
-	category ? category.charAt(0).toUpperCase() + category.slice(1) : "Other";
+const formatSize = (bytes) =>
+	bytes < 1024 * 1024
+		? `${Math.max(1, Math.round(bytes / 1024))} KB`
+		: `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
-// Turn one Promise.allSettled entry into { value, error }.
-const settle = (result, fallbackError) => {
-	if (result.status === "rejected") {
-		return { value: null, error: result.reason?.message || fallbackError };
+// Returns an error message, or "" if the file is acceptable.
+const validateFile = (file) => {
+	if (!file) return "Choose a file to upload.";
+	const name = file.name.toLowerCase();
+	if (!name.endsWith(".pdf") && !name.endsWith(".docx")) {
+		return "Upload a PDF or Word (.docx) file. Older .doc files aren't supported.";
 	}
-	if (result.value?.status !== "success") {
-		return { value: null, error: fallbackError };
+	if (file.size >= MAX_FILE_BYTES) {
+		return `That file is ${formatSize(file.size)}. Resumes must be smaller than 5 MB.`;
 	}
-	return { value: result.value, error: "" };
+	if (file.size === 0) return "That file is empty.";
+	return "";
 };
 
-const StatCard = ({ label, value, hint }) => (
-	<div className="col-6 col-lg-3">
-		<div className="card h-100 shadow-sm text-center">
-			<div className="card-body">
-				<div className="text-muted small">{label}</div>
-				<div className="fs-4 fw-semibold">{value}</div>
-				{hint && <div className="text-muted small">{hint}</div>}
-			</div>
-		</div>
-	</div>
-);
-
-const SectionError = ({ message }) => (
-	<div className="alert alert-danger py-2 mb-0" role="alert">
-		{message}
-	</div>
-);
-
-const ResumeDashboard = () => {
+const ResumeUpload = () => {
 	const uid = useSelector((state) => state.authedUser);
-	const [results, setResults] = useState(EMPTY_RESULTS);
-	const [errors, setErrors] = useState({});
-	// Start in the loading state so the page never flashes "No results" before the first run.
-	const [loading, setLoading] = useState(true);
-	const [reloadCount, setReloadCount] = useState(0);
+	const navigate = useNavigate();
+	// The dashboard's "Update resume" button deletes the old resume first,
+	// then opens this page with { replaced: true }.
+	const replaced = useLocation().state?.replaced === true;
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: reloadCount intentionally triggers a reload.
+	const [mode, setMode] = useState("file"); // "file" | "text"
+	const [file, setFile] = useState(null);
+	const [dragging, setDragging] = useState(false);
+	const [text, setText] = useState("");
+	const [progress, setProgress] = useState(null); // 0-100 while uploading
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState("");
+
+	// Pre-fill a previously typed resume so the user can edit it.
 	useEffect(() => {
-		if (!uid) {
-			setResults(EMPTY_RESULTS);
-			setErrors({});
-			setLoading(false);
-			return;
-		}
-
+		if (!uid) return;
 		let cancelled = false;
-		setLoading(true);
-		setErrors({});
-
-		Promise.allSettled([
-			extractResumeText(),
-			identifyResumeSkills(),
-			analyzeResume(),
-		]).then(([textResult, skillsResult, analysisResult]) => {
-			if (cancelled) return;
-			const text = settle(textResult, "Resume text extraction failed.");
-			const skills = settle(skillsResult, "Skill identification failed.");
-			const analysis = settle(analysisResult, "Resume analysis failed.");
-
-			setResults({
-				text: text.value,
-				skills: skills.value ? (skills.value.skills ?? []) : null,
-				analysis: analysis.value,
+		get(dbRef(getDatabase(), `users/${uid}/resumeText`))
+			.then((snap) => {
+				const saved = snap.val();
+				if (!cancelled && typeof saved === "string" && saved.trim()) {
+					setText(saved);
+					setMode("text");
+				}
+			})
+			.catch(() => {
+				/* nothing saved, or not readable: start empty */
 			});
-			setErrors({
-				text: text.error,
-				skills: skills.error,
-				analysis: analysis.error,
-			});
-			setLoading(false);
-		});
-
 		return () => {
 			cancelled = true;
 		};
-	}, [uid, reloadCount]);
+	}, [uid]);
+
+	const pickFile = (picked) => {
+		setError(validateFile(picked));
+		setFile(picked ?? null);
+	};
+
+	const handleDrop = (event) => {
+		event.preventDefault();
+		setDragging(false);
+		if (!saving) pickFile(event.dataTransfer.files?.[0]);
+	};
+
+	const uploadFile = async () => {
+		const problem = validateFile(file);
+		if (problem) {
+			setError(problem);
+			return;
+		}
+		setSaving(true);
+		setError("");
+		setProgress(0);
+		try {
+			// Uploading to the same path replaces (deletes) the previous file.
+			const task = uploadBytesResumable(
+				resumeFileRef(uid),
+				file,
+				{
+					contentType: file.type || undefined,
+					customMetadata: { originalName: file.name },
+				},
+			);
+			await new Promise((resolve, reject) => {
+				task.on(
+					"state_changed",
+					(snap) =>
+						setProgress(
+							Math.round((snap.bytesTransferred / snap.totalBytes) * 100),
+						),
+					reject,
+					resolve,
+				);
+			});
+			// Delete the typed resume too; the server would otherwise keep using it.
+			await set(dbRef(getDatabase(), `users/${uid}/resumeText`), null);
+			await set(dbRef(getDatabase(), `users/${uid}/${RESUME_PATH_KEY}`), `resume/${uid}`);
+			navigate("/dashboard");
+		} catch (err) {
+			setError(
+				err?.code === "storage/unauthorized"
+					? "You don't have permission to upload this file. Try signing out and back in."
+					: err?.message || "Upload failed. Please try again.",
+			);
+			setSaving(false);
+			setProgress(null);
+		}
+	};
+
+	const saveText = async () => {
+		const trimmed = text.trim();
+		if (trimmed.length < MIN_TEXT_CHARS) {
+			setError("Paste your full resume (at least a few lines).");
+			return;
+		}
+		setSaving(true);
+		setError("");
+		try {
+			await set(dbRef(getDatabase(), `users/${uid}/resumeText`), trimmed);
+		} catch (err) {
+			setError(err?.message || "Saving failed. Please try again.");
+			setSaving(false);
+			return;
+		}
+		try {
+			// New text is saved, so the old uploaded file and its path key can go.
+			await deleteResumeFile(uid);
+			await set(dbRef(getDatabase(), `users/${uid}/${RESUME_PATH_KEY}`), null);
+		} catch (err) {
+			setError(
+				"Your new resume was saved, but the old uploaded file couldn't be deleted" +
+					(err?.code ? ` (${err.code})` : "") +
+					". Try again, or continue to the dashboard.",
+			);
+			setSaving(false);
+			return;
+		}
+		navigate("/dashboard");
+	};
+
+	const handleSubmit = (event) => {
+		event.preventDefault();
+		if (saving) return;
+		if (mode === "file") uploadFile();
+		else saveText();
+	};
 
 	if (!uid) {
 		return (
 			<div className="container mt-4 mb-5">
-				<h2 className="mb-3">Resume Dashboard</h2>
-				<p className="text-muted">Please sign in to see your dashboard.</p>
+				<h2 className="mb-3">My Resume</h2>
+				<p className="text-muted">Please sign in to upload your resume.</p>
 			</div>
 		);
 	}
 
-	if (loading) {
-		return (
-			<Loading
-				title="Building your dashboard…"
-				detail="Reading your resume and identifying skills. This can take a minute the first time."
-			/>
-		);
-	}
-
-	const { text, skills, analysis } = results;
-	const nothingLoaded = !text && !skills && !analysis;
-	const advancedCount = skills?.filter((s) => s.level >= 4).length ?? 0;
-	const highestDegree = DEGREE_ORDER.find((degree) =>
-		analysis?.education?.includes(degree),
-	);
+	const fileError = mode === "file" ? validateFile(file) : "";
+	const canSubmit =
+		!saving &&
+		(mode === "file" ? !fileError : text.trim().length >= MIN_TEXT_CHARS);
 
 	return (
 		<div className="container mt-4 mb-5">
-			<div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
-				<div>
-					<h2 className="mb-0">Resume Dashboard</h2>
-					{text && (
-						<div className="text-muted small">
-							{text.fileName} · {text.characterCount?.toLocaleString()}{" "}
-							characters
+			<h2 className="text-center mb-2">My Resume</h2>
+			<p className="text-center text-muted mb-4">
+				Upload your resume or paste it below. We'll identify your skills from
+				it.
+			</p>
+
+			{replaced && (
+				<div
+					className="alert alert-info mx-auto"
+					style={{ maxWidth: 750 }}
+					role="status"
+				>
+					Your previous resume was deleted. Upload or type your new one.
+				</div>
+			)}
+
+			<div className="card shadow-sm mx-auto" style={{ maxWidth: 750 }}>
+				<div className="card-header">
+					<ul className="nav nav-tabs card-header-tabs">
+						<li className="nav-item">
+							<button
+								type="button"
+								className={`nav-link ${mode === "file" ? "active" : ""}`}
+								onClick={() => {
+									setMode("file");
+									setError("");
+								}}
+								disabled={saving}
+							>
+								Upload a file
+							</button>
+						</li>
+						<li className="nav-item">
+							<button
+								type="button"
+								className={`nav-link ${mode === "text" ? "active" : ""}`}
+								onClick={() => {
+									setMode("text");
+									setError("");
+								}}
+								disabled={saving}
+							>
+								Type or paste
+							</button>
+						</li>
+					</ul>
+				</div>
+
+				<form className="card-body" onSubmit={handleSubmit}>
+					{mode === "file" ? (
+						<>
+							<label
+								htmlFor="resume-file"
+								className={`d-block border border-2 rounded p-4 text-center mb-3 ${
+									dragging ? "border-primary bg-light" : "border-secondary-subtle"
+								}`}
+								style={{ borderStyle: "dashed", cursor: saving ? "default" : "pointer" }}
+								onDragOver={(e) => {
+									e.preventDefault();
+									setDragging(true);
+								}}
+								onDragLeave={() => setDragging(false)}
+								onDrop={handleDrop}
+							>
+								{file ? (
+									<>
+										<div className="fw-semibold">{file.name}</div>
+										<div className="text-muted small">
+											{formatSize(file.size)} · click to choose a different file
+										</div>
+									</>
+								) : (
+									<>
+										<div className="fw-semibold">
+											Drag your resume here, or click to choose a file
+										</div>
+										<div className="text-muted small">
+											PDF or Word (.docx), smaller than 5 MB
+										</div>
+									</>
+								)}
+							</label>
+							<input
+								id="resume-file"
+								type="file"
+								accept={ACCEPT}
+								className="d-none"
+								disabled={saving}
+								onChange={(e) => {
+									pickFile(e.target.files?.[0]);
+									e.target.value = ""; // allow re-picking the same file
+								}}
+							/>
+							{progress !== null && (
+								<div
+									className="progress mb-3"
+									role="progressbar"
+									aria-label="Upload progress"
+									aria-valuenow={progress}
+									aria-valuemin={0}
+									aria-valuemax={100}
+								>
+									<div className="progress-bar" style={{ width: `${progress}%` }}>
+										{progress}%
+									</div>
+								</div>
+							)}
+							<p className="text-muted small">
+								Scanned PDFs (photos of paper) have no readable text. If yours is
+								one, use "Type or paste" instead.
+							</p>
+						</>
+					) : (
+						<div className="mb-3">
+							<label htmlFor="resume-text" className="form-label">
+								Resume text
+							</label>
+							<textarea
+								id="resume-text"
+								className="form-control"
+								rows={14}
+								maxLength={MAX_TEXT_CHARS}
+								placeholder="Paste your resume here: experience, education and skills"
+								value={text}
+								onChange={(e) => setText(e.target.value)}
+								disabled={saving}
+							/>
+							<div className="form-text">
+								{text.length.toLocaleString()} / {MAX_TEXT_CHARS.toLocaleString()}{" "}
+								characters. Saving this deletes any uploaded resume file.
+							</div>
 						</div>
 					)}
-				</div>
-				<div className="d-flex gap-2">
-					<Link
-						to="/resume"
-						state={{ replace: true }}
-						className="btn btn-outline-secondary"
-					>
-						Update resume
-					</Link>
-					<button
-						type="button"
-						className="btn btn-outline-primary"
-						onClick={() => setReloadCount((n) => n + 1)}
-					>
-						Refresh
-					</button>
-				</div>
+
+					{error && (
+						<div className="alert alert-danger py-2" role="alert">
+							{error}
+						</div>
+					)}
+
+					<div className="d-flex justify-content-between align-items-center">
+						
+						<button type="submit" className="btn btn-primary" disabled={!canSubmit}>
+							{saving
+								? mode === "file"
+									? "Uploading…"
+									: "Saving…"
+								: mode === "file"
+									? "Upload resume"
+									: "Save resume"}
+						</button>
+					</div>
+				</form>
 			</div>
-
-			{nothingLoaded ? (
-				// All three failed (usually: no resume uploaded yet), so show one message.
-				<>
-					<SectionError
-						message={
-							errors.text || errors.skills || errors.analysis || "No results."
-						}
-					/>
-					<Link
-						to="/resume"
-						state={{ replace: true }}
-						className="btn btn-primary mt-3"
-					>
-						Upload or type a resume
-					</Link>
-				</>
-			) : (
-				<>
-					{/* Summary tiles */}
-					<div className="row g-3 mb-4">
-						<StatCard label="Skills identified" value={skills?.length ?? "—"} />
-						<StatCard
-							label="Advanced or expert"
-							value={skills ? advancedCount : "—"}
-							hint="estimated"
-						/>
-						<StatCard
-							label="Experience"
-							value={
-								analysis?.yearsExperience != null
-									? `${analysis.yearsExperience} yrs`
-									: "—"
-							}
-						/>
-						<StatCard label="Highest education" value={highestDegree ?? "—"} />
-					</div>
-
-					{/* Skills */}
-					<div className="card shadow-sm mb-4">
-						<div className="card-header">Skills</div>
-						<div className="card-body">
-							{errors.skills ? (
-								<SectionError message={errors.skills} />
-							) : skills.length === 0 ? (
-								<p className="text-muted mb-0">No skills identified.</p>
-							) : (
-								<>
-									<div className="table-responsive">
-										<table className="table table-sm align-middle mb-0">
-											<thead>
-												<tr>
-													<th>Skill</th>
-													<th>Category</th>
-													<th style={{ width: "45%" }}>Estimated level</th>
-												</tr>
-											</thead>
-											<tbody>
-												{skills.map((skill) => (
-													<tr key={skill.skillId}>
-														<td title={skill.evidence?.join("\n")}>
-															{skill.name}
-														</td>
-														<td className="text-muted">
-															{formatCategory(skill.category)}
-														</td>
-														<td>
-															<div className="d-flex align-items-center gap-2">
-																<div
-																	className="progress flex-grow-1"
-																	style={{ height: 8 }}
-																	role="progressbar"
-																	aria-label={`${skill.name} level`}
-																	aria-valuenow={skill.level}
-																	aria-valuemin={0}
-																	aria-valuemax={5}
-																>
-																	<div
-																		className="progress-bar"
-																		style={{ width: `${skill.level * 20}%` }}
-																	/>
-																</div>
-																<small
-																	className="text-muted"
-																	style={{ minWidth: 90 }}
-																>
-																	{LEVEL_LABELS[skill.level] ?? skill.level}
-																</small>
-															</div>
-														</td>
-													</tr>
-												))}
-											</tbody>
-										</table>
-									</div>
-									<p className="text-muted small mt-3 mb-0">
-										Levels are estimated from how each skill is described in
-										your resume. Hover over a skill to see where it was found.
-									</p>
-								</>
-							)}
-						</div>
-					</div>
-
-					{/* Education and occupations */}
-					<div className="row g-3 mb-4">
-						<div className="col-md-6">
-							<div className="card shadow-sm h-100">
-								<div className="card-header">Education Mentioned</div>
-								<div className="card-body">
-									{errors.analysis ? (
-										<SectionError message={errors.analysis} />
-									) : analysis.education?.length > 0 ? (
-										<ul className="mb-0">
-											{analysis.education.map((degree) => (
-												<li key={degree}>{degree}</li>
-											))}
-										</ul>
-									) : (
-										<p className="text-muted mb-0">No degrees identified.</p>
-									)}
-								</div>
-							</div>
-						</div>
-						<div className="col-md-6">
-							<div className="card shadow-sm h-100">
-								<div className="card-header">Occupations Mentioned</div>
-								<div className="card-body">
-									{errors.analysis ? (
-										<SectionError message={errors.analysis} />
-									) : analysis.possibleOccupations?.length > 0 ? (
-										<ul className="mb-0">
-											{analysis.possibleOccupations.map((occupation) => (
-												<li key={occupation}>{occupation}</li>
-											))}
-										</ul>
-									) : (
-										<p className="text-muted mb-0">
-											No occupations identified.
-										</p>
-									)}
-								</div>
-							</div>
-						</div>
-					</div>
-
-					{/* Extracted text */}
-					<div className="card shadow-sm">
-						<div className="card-header">Resume Text</div>
-						<div className="card-body">
-							{errors.text ? (
-								<SectionError message={errors.text} />
-							) : (
-								<details>
-									<summary>Show extracted text</summary>
-									<div
-										className="border rounded p-3 bg-light mt-3"
-										style={{
-											whiteSpace: "pre-wrap",
-											overflowWrap: "anywhere",
-											maxHeight: 400,
-											overflowY: "auto",
-										}}
-									>
-										{text.text}
-									</div>
-								</details>
-							)}
-						</div>
-					</div>
-				</>
-			)}
 		</div>
 	);
 };
 
-export default ResumeDashboard;
+export default ResumeUpload;

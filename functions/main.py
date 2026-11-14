@@ -33,6 +33,9 @@ initialize_app(
     }
 )
 
+# Imported after initialize_app() so these handlers share the configured app.
+from target_job import list_target_roles, select_target_role  # noqa: E402,F401
+
 
 def _resume_path(uid):
     """Return the Storage path of a user's resume.
