@@ -6,14 +6,18 @@ import re
 import zipfile
 
 from docx import Document
-from firebase_admin import initialize_app, storage
+from firebase_admin import db, initialize_app, storage
 from firebase_functions import https_fn
 from firebase_functions.options import set_global_options
 from google.api_core.exceptions import NotFound
 from pypdf import PdfReader
 
 from skillpath.catalog import load_catalog
-from skillpath.extraction import extract_skills, get_default_tagger
+from skillpath.extraction import (
+    apply_level_overrides,
+    extract_skills,
+    get_default_tagger,
+)
 from skillpath.text_extract import clean_text
 
 PROJECT_ID = "mynotes-ae8c6"
@@ -32,6 +36,11 @@ initialize_app(
         "storageBucket": STORAGE_BUCKET,
     }
 )
+
+# Import after initialization to register these handlers with the configured app.
+# pylint: disable=wrong-import-position,unused-import
+from target_job import list_target_roles, select_target_role  # noqa: E402,F401
+# pylint: enable=wrong-import-position,unused-import
 
 
 def _resume_path(uid):
@@ -179,8 +188,26 @@ def _extract_document_text(file_bytes):
     return file_type, text
 
 
+def _load_typed_resume(uid):
+    """Return the user's typed resume text, or None if they have not typed one.
+
+    The web app clears ``users/<uid>/resumeText`` whenever a file is uploaded,
+    so a typed resume here is always newer than any uploaded file.
+    """
+    typed_text = db.reference(f"users/{uid}/resumeText").get()
+    if not isinstance(typed_text, str) or not typed_text.strip():
+        return None
+    typed_text = typed_text.strip()
+    if len(typed_text) > MAX_TEXT_LENGTH:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="Resume text exceeds the 100,000 character limit.",
+        )
+    return typed_text
+
+
 def _load_resume_text(uid):
-    """Load and extract the authenticated user's uploaded resume.
+    """Load the authenticated user's resume: typed text, else the uploaded file.
 
     Args:
         uid: Firebase Authentication UID of the resume owner.
@@ -192,6 +219,10 @@ def _load_resume_text(uid):
         https_fn.HttpsError: If the file is missing, invalid, or its contents
             cannot be extracted.
     """
+    typed_text = _load_typed_resume(uid)
+    if typed_text:
+        return "Typed resume", typed_text
+
     file_path = _resume_path(uid)
 
     try:
@@ -222,6 +253,20 @@ def _load_resume_text(uid):
         )
 
     return f"resume.{file_type}", extracted_text
+
+
+def _load_level_overrides(uid):
+    """Return the skill levels the user set themselves ({skillId: level}).
+
+    Written by the Skills page to ``users/<uid>/skillLevels``. A read failure
+    only means estimates are shown, so it is logged rather than raised.
+    """
+    try:
+        overrides = db.reference(f"users/{uid}/skillLevels").get()
+    except Exception:  # pylint: disable=broad-exception-caught
+        logging.exception("Could not read skill level overrides.")
+        return {}
+    return overrides if isinstance(overrides, dict) else {}
 
 
 @https_fn.on_call()
@@ -266,9 +311,14 @@ def identify_resume_skills(request: https_fn.CallableRequest):
     Args:
         request: The Firebase callable request, including authentication data.
 
+    Levels the user set on the Skills page (``users/<uid>/skillLevels``)
+    replace the estimates.
+
     Returns:
         A mapping with success status and the identified skills, each with
-        ``skillId``, ``name``, ``category``, estimated ``level`` (1-5) and
+        ``skillId``, ``name``, ``category``, ``level`` (0-5, the user's own
+        value if they set one), ``estimatedLevel``, ``userSet``,
+        ``levelReasons`` (how the estimate was made), ``evidence`` and
         ``confidence``.
 
     Raises:
@@ -296,9 +346,12 @@ def identify_resume_skills(request: https_fn.CallableRequest):
             message="Skill identification failed.",
         ) from error
 
+    skills = apply_level_overrides(
+        result["skills"], _load_level_overrides(request.auth.uid)
+    )
     return {
         "status": "success",
-        "skills": result["skills"],
+        "skills": skills,
     }
 
 

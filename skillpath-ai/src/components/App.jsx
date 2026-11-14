@@ -2,6 +2,7 @@ import "../App.css";
 import { Navigate, Route, Routes } from "react-router-dom";
 import "bootstrap";
 import "bootstrap/dist/css/bootstrap.css";
+import "../layout.css"; // after App.css and Bootstrap: full-width page, fixed toolbar
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { faBars } from "@fortawesome/free-solid-svg-icons";
 import { onAuthStateChanged } from "firebase/auth";
@@ -13,9 +14,11 @@ import { handleInitialData } from "../actions/shared.jsx";
 import { auth } from "../backend/firebase.jsx";
 import Login from "./Login.jsx";
 import NewUser from "./NewUser.jsx";
+import ResumeDashboard from "./ResumeDashboard.jsx";
 import ResumeSkills from "./ResumeSkills.jsx";
 import ResumeUpload from "./ResumeUpload.jsx";
 import Toolbar from "./Toolbar.jsx";
+import Training from "./Training.jsx";
 
 library.add(faBars);
 
@@ -78,7 +81,9 @@ function App({ authedUser, loaded, dispatch }) {
 			<Routes>
 				<Route path="/resume" element={<ResumeUpload />} />
 				<Route path="/skills" element={<ResumeSkills />} />
-				<Route path="*" element={<Navigate to="/resume" replace />} />
+				<Route path="/dashboard" element={<ResumeDashboard />} />
+				<Route path="/training" element={<Training />} />
+				<Route path="*" element={<Navigate to="/dashboard" replace />} />
 			</Routes>
 		</div>
 	);

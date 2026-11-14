@@ -212,6 +212,8 @@ export async function uploadResume(uid, file) {
 			[`users/${uid}/resumePath`]: snapshot.ref.fullPath,
 			[`users/${uid}/resumeFileName`]: file.name,
 			[`users/${uid}/resumeContentType`]: contentType,
+			// The newest resume wins: drop any typed resume so the functions read this file.
+			[`users/${uid}/resumeText`]: null,
 		});
 	} catch (error) {
 		await deleteObject(snapshot.ref).catch((cleanupError) => {
@@ -301,5 +303,72 @@ export async function analyzeResume() {
 	await user.getIdToken();
 	const callable = httpsCallable(functions, "analyze_resume");
 	const result = await callable({});
+	return result.data;
+}
+
+// NEW: list the jobs the user can choose on the Resume Dashboard.
+// Calls the list_target_roles Cloud Function (functions/target_job.py), which
+// reads the role catalog. Returns:
+//   { status: "success",
+//     roles: [{ id, title, onetCode, onetTitle, requirementCount }],  // sorted by title
+//     savedTarget: { roleId, resolvedTitle, custom } | null,         // job chosen last time
+//     latestAnalysis: <analysis from select_target_role> | null }   // its latest result
+export async function listTargetRoles() {
+	const user = auth.currentUser;
+	if (!user) {
+		throw new Error("Please sign in first.");
+	}
+
+	await user.getIdToken();
+	const callable = httpsCallable(functions, "list_target_roles");
+	const result = await callable({});
+	return result.data;
+}
+
+// NEW: Identify if the user has a resume uploaded or typed in.
+// Returns true if either resumePath or resumeText exists in the user's profile.
+export async function userHasResumeUploaded() {
+	const user = auth.currentUser;
+	if (!user) {
+		throw new Error("Please sign in first.");
+	}
+
+	await user.getIdToken();
+
+	try {
+		const [pathSnapshot, textSnapshot] = await Promise.all([
+			get(child(dbRef, `users/${user.uid}/resumePath`)),
+			get(child(dbRef, `users/${user.uid}/resumeText`)),
+		]);
+		const resumePath = pathSnapshot.val();
+		const resumeText = textSnapshot.val();
+
+		const hasFile = typeof resumePath === "string" && resumePath.trim() !== "";
+		const hasText = typeof resumeText === "string" && resumeText.trim() !== "";
+		return hasFile || hasText;
+	} catch (error) {
+		console.error("Could not check for a saved resume:", error);
+		return false;
+	}
+}
+
+// NEW: save the job the user chose and compare their skills with it.
+// Calls the select_target_role Cloud Function, which looks up the skills the
+// role requires in the catalog and runs the gap analysis.
+//   roleId - an id from listTargetRoles().roles
+//   skills - [{ skillId, level }], e.g. built from identifyResumeSkills()
+// Returns { status: "success", target, analysisId, analysis }. analysis holds
+// readiness (0-100), gaps (status "missing" or "partial"), strengths (skills
+// already at the required level), summary and pathway. It is null when no
+// skills are sent: the job is still saved, but there is nothing to compare.
+export async function selectTargetRole(roleId, skills) {
+	const user = auth.currentUser;
+	if (!user) {
+		throw new Error("Please sign in first.");
+	}
+
+	await user.getIdToken();
+	const callable = httpsCallable(functions, "select_target_role");
+	const result = await callable({ target: { roleId }, skills });
 	return result.data;
 }

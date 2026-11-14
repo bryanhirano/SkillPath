@@ -1,365 +1,363 @@
-import { useState } from "react";
+import { ref as dbRef, get, getDatabase, set } from "firebase/database";
+import { uploadBytesResumable } from "firebase/storage";
+import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
-	analyzeResume,
-	extractResumeText,
-	saveResumeText,
-	uploadResume,
-} from "../backend/firebase.jsx";
+	deleteResumeFile,
+	RESUME_PATH_KEY,
+	resumeFileRef,
+} from "../backend/resumeStorage.js";
 
-const MAX_RESUME_TEXT_LENGTH = 100000;
+/**
+ * Resume upload page: upload a PDF or Word file, or type/paste the resume.
+ *
+ * Matches what the Cloud Functions in functions/main.py read:
+ * - uploaded file -> Storage object `resume/{uid}` (no extension; the server
+ *   detects PDF or DOCX from the file contents)
+ * - typed resume  -> Realtime Database `users/{uid}/resumeText`
+ *
+ * A user has one resume at a time. Submitting a new one deletes the old one:
+ * - new file  -> overwrites `resume/{uid}` and deletes any typed resume
+ * - new text  -> saved, then the uploaded file `resume/{uid}` is deleted
+ * The old resume is only removed once the new one is safely stored, so a
+ * failed upload never leaves the user with no resume at all.
+ */
+
+const MAX_FILE_BYTES = 5 * 1024 * 1024; // server rejects files of 5 MB or more
+const MAX_TEXT_CHARS = 100_000; // server limit for typed resumes
+const MIN_TEXT_CHARS = 50;
+const ACCEPT =
+	".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+const formatSize = (bytes) =>
+	bytes < 1024 * 1024
+		? `${Math.max(1, Math.round(bytes / 1024))} KB`
+		: `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+
+// Returns an error message, or "" if the file is acceptable.
+const validateFile = (file) => {
+	if (!file) return "Choose a file to upload.";
+	const name = file.name.toLowerCase();
+	if (!name.endsWith(".pdf") && !name.endsWith(".docx")) {
+		return "Upload a PDF or Word (.docx) file. Older .doc files aren't supported.";
+	}
+	if (file.size >= MAX_FILE_BYTES) {
+		return `That file is ${formatSize(file.size)}. Resumes must be smaller than 5 MB.`;
+	}
+	if (file.size === 0) return "That file is empty.";
+	return "";
+};
 
 const ResumeUpload = () => {
 	const uid = useSelector((state) => state.authedUser);
-	const [mode, setMode] = useState("file");
+	const navigate = useNavigate();
+	// The dashboard's "Update resume" button deletes the old resume first,
+	// then opens this page with { replaced: true }.
+	const replaced = useLocation().state?.replaced === true;
+
+	const [mode, setMode] = useState("file"); // "file" | "text"
 	const [file, setFile] = useState(null);
+	const [dragging, setDragging] = useState(false);
 	const [text, setText] = useState("");
-	const [busy, setBusy] = useState(false);
-	const [extracting, setExtracting] = useState(false);
-	const [analyzing, setAnalyzing] = useState(false);
-	const [message, setMessage] = useState("");
+	const [progress, setProgress] = useState(null); // 0-100 while uploading
+	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState("");
-	const [extractedText, setExtractedText] = useState("");
-	const [extractedFileName, setExtractedFileName] = useState("");
-	const [analysis, setAnalysis] = useState(null);
-	const isBusy = busy || extracting || analyzing;
 
-	const handleFileChange = (event) => {
-		const selected = event.target.files?.[0];
-		if (!selected) return;
+	// Pre-fill a previously typed resume so the user can edit it.
+	useEffect(() => {
+		if (!uid) return;
+		let cancelled = false;
+		get(dbRef(getDatabase(), `users/${uid}/resumeText`))
+			.then((snap) => {
+				const saved = snap.val();
+				if (!cancelled && typeof saved === "string" && saved.trim()) {
+					setText(saved);
+					setMode("text");
+				}
+			})
+			.catch(() => {
+				/* nothing saved, or not readable: start empty */
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [uid]);
 
-		const fileName = selected.name.toLowerCase();
-		if (fileName.endsWith(".pdf") || fileName.endsWith(".docx")) {
-			setFile(selected);
-			setError("");
-			setMessage("");
-			setExtractedText("");
-			setExtractedFileName("");
-			setAnalysis(null);
-			return;
-		}
-
-		setFile(null);
-		setError("Please select a valid PDF or DOCX file.");
-		event.target.value = "";
+	const pickFile = (picked) => {
+		setError(validateFile(picked));
+		setFile(picked ?? null);
 	};
 
-	const handleSubmit = async (event) => {
+	const handleDrop = (event) => {
 		event.preventDefault();
+		setDragging(false);
+		if (!saving) pickFile(event.dataTransfer.files?.[0]);
+	};
+
+	const uploadFile = async () => {
+		const problem = validateFile(file);
+		if (problem) {
+			setError(problem);
+			return;
+		}
+		setSaving(true);
 		setError("");
-		setMessage("");
-
-		if (!uid) {
-			setError("Please sign in first.");
-			return;
-		}
-
-		if (mode === "file" && !file) {
-			setError("Please select a file to upload.");
-			return;
-		}
-
-		if (mode === "text" && !text.trim()) {
-			setError("Please type or paste your resume text.");
-			return;
-		}
-
-		if (mode === "text" && text.length > MAX_RESUME_TEXT_LENGTH) {
-			setError("Resume text must be 100,000 characters or fewer.");
-			return;
-		}
-
-		setBusy(true);
+		setProgress(0);
 		try {
-			if (mode === "file") {
-				await uploadResume(uid, file);
-				setMessage("Resume uploaded successfully!");
-				setExtractedText("");
-				setExtractedFileName("");
-				setAnalysis(null);
-			} else {
-				await saveResumeText(uid, text);
-				setMessage("Resume text saved successfully!");
-				setAnalysis(null);
-			}
-		} catch (uploadError) {
-			setError(
-				mode === "file"
-					? `Failed to upload file: ${uploadError.message}`
-					: `Failed to save text: ${uploadError.message}`,
+			// Uploading to the same path replaces (deletes) the previous file.
+			const task = uploadBytesResumable(resumeFileRef(uid), file, {
+				contentType: file.type || undefined,
+				customMetadata: { originalName: file.name },
+			});
+			await new Promise((resolve, reject) => {
+				task.on(
+					"state_changed",
+					(snap) =>
+						setProgress(
+							Math.round((snap.bytesTransferred / snap.totalBytes) * 100),
+						),
+					reject,
+					resolve,
+				);
+			});
+			// Delete the typed resume too; the server would otherwise keep using it.
+			await set(dbRef(getDatabase(), `users/${uid}/resumeText`), null);
+			await set(
+				dbRef(getDatabase(), `users/${uid}/${RESUME_PATH_KEY}`),
+				`resume/${uid}`,
 			);
-		} finally {
-			setBusy(false);
+			navigate("/dashboard");
+		} catch (err) {
+			setError(
+				err?.code === "storage/unauthorized"
+					? "You don't have permission to upload this file. Try signing out and back in."
+					: err?.message || "Upload failed. Please try again.",
+			);
+			setSaving(false);
+			setProgress(null);
 		}
 	};
 
-	const handleExtract = async () => {
-		setError("");
-		setMessage("");
-		setExtractedText("");
-		setExtractedFileName("");
-		setAnalysis(null);
-
-		if (!uid) {
-			setError("Please sign in first.");
+	const saveText = async () => {
+		const trimmed = text.trim();
+		if (trimmed.length < MIN_TEXT_CHARS) {
+			setError("Paste your full resume (at least a few lines).");
 			return;
 		}
-
-		setExtracting(true);
-		try {
-			const result = await extractResumeText();
-			if (result.status !== "success") {
-				throw new Error("Resume extraction was unsuccessful.");
-			}
-
-			setExtractedText(result.text || "");
-			setExtractedFileName(result.fileName || "");
-			setMessage("Resume text extracted successfully!");
-		} catch (extractError) {
-			setError(`Failed to extract resume: ${extractError.message}`);
-		} finally {
-			setExtracting(false);
-		}
-	};
-
-	const handleAnalyze = async () => {
+		setSaving(true);
 		setError("");
-		setMessage("");
-		setAnalysis(null);
-
-		if (!uid) {
-			setError("Please sign in first.");
+		try {
+			await set(dbRef(getDatabase(), `users/${uid}/resumeText`), trimmed);
+		} catch (err) {
+			setError(err?.message || "Saving failed. Please try again.");
+			setSaving(false);
 			return;
 		}
-
-		setAnalyzing(true);
 		try {
-			const result = await analyzeResume();
-			if (result.status !== "success") {
-				throw new Error("Resume analysis was unsuccessful.");
-			}
-
-			setAnalysis(result);
-			setMessage("Resume analysis completed successfully!");
-		} catch (analysisError) {
-			setError(`Failed to analyze resume: ${analysisError.message}`);
-		} finally {
-			setAnalyzing(false);
+			// New text is saved, so the old uploaded file and its path key can go.
+			await deleteResumeFile(uid);
+			await set(dbRef(getDatabase(), `users/${uid}/${RESUME_PATH_KEY}`), null);
+		} catch (err) {
+			setError(
+				"Your new resume was saved, but the old uploaded file couldn't be deleted" +
+					(err?.code ? ` (${err.code})` : "") +
+					". Try again, or continue to the dashboard.",
+			);
+			setSaving(false);
+			return;
 		}
+		navigate("/dashboard");
 	};
+
+	const handleSubmit = (event) => {
+		event.preventDefault();
+		if (saving) return;
+		if (mode === "file") uploadFile();
+		else saveText();
+	};
+
+	if (!uid) {
+		return (
+			<div className="container mt-4 mb-5">
+				<h2 className="mb-3">My Resume</h2>
+				<p className="text-muted">Please sign in to upload your resume.</p>
+			</div>
+		);
+	}
+
+	const fileError = mode === "file" ? validateFile(file) : "";
+	const canSubmit =
+		!saving &&
+		(mode === "file" ? !fileError : text.trim().length >= MIN_TEXT_CHARS);
 
 	return (
 		<div className="container mt-4 mb-5">
+			<h2 className="text-center mb-2">My Resume</h2>
+			<p className="text-center text-muted mb-4">
+				Upload your resume or paste it below. We'll identify your skills from
+				it.
+			</p>
+
+			{replaced && (
+				<div
+					className="alert alert-info mx-auto"
+					style={{ maxWidth: 750 }}
+					role="status"
+				>
+					Your previous resume was deleted. Upload or type your new one.
+				</div>
+			)}
+
 			<div className="card shadow-sm mx-auto" style={{ maxWidth: 750 }}>
-				<div className="card-header">Upload or Type Your Resume</div>
-				<div className="card-body">
+				<div className="card-header">
+					<ul className="nav nav-tabs card-header-tabs">
+						<li className="nav-item">
+							<button
+								type="button"
+								className={`nav-link ${mode === "file" ? "active" : ""}`}
+								onClick={() => {
+									setMode("file");
+									setError("");
+								}}
+								disabled={saving}
+							>
+								Upload a file
+							</button>
+						</li>
+						<li className="nav-item">
+							<button
+								type="button"
+								className={`nav-link ${mode === "text" ? "active" : ""}`}
+								onClick={() => {
+									setMode("text");
+									setError("");
+								}}
+								disabled={saving}
+							>
+								Type or paste
+							</button>
+						</li>
+					</ul>
+				</div>
+
+				<form className="card-body" onSubmit={handleSubmit}>
+					{mode === "file" ? (
+						<>
+							<label
+								htmlFor="resume-file"
+								className={`d-block border border-2 rounded p-4 text-center mb-3 ${
+									dragging
+										? "border-primary bg-light"
+										: "border-secondary-subtle"
+								}`}
+								style={{
+									borderStyle: "dashed",
+									cursor: saving ? "default" : "pointer",
+								}}
+								onDragOver={(e) => {
+									e.preventDefault();
+									setDragging(true);
+								}}
+								onDragLeave={() => setDragging(false)}
+								onDrop={handleDrop}
+							>
+								{file ? (
+									<>
+										<div className="fw-semibold">{file.name}</div>
+										<div className="text-muted small">
+											{formatSize(file.size)} · click to choose a different file
+										</div>
+									</>
+								) : (
+									<>
+										<div className="fw-semibold">
+											Drag your resume here, or click to choose a file
+										</div>
+										<div className="text-muted small">
+											PDF or Word (.docx), smaller than 5 MB
+										</div>
+									</>
+								)}
+							</label>
+							<input
+								id="resume-file"
+								type="file"
+								accept={ACCEPT}
+								className="d-none"
+								disabled={saving}
+								onChange={(e) => {
+									pickFile(e.target.files?.[0]);
+									e.target.value = ""; // allow re-picking the same file
+								}}
+							/>
+							{progress !== null && (
+								<div
+									className="progress mb-3"
+									role="progressbar"
+									aria-label="Upload progress"
+									aria-valuenow={progress}
+									aria-valuemin={0}
+									aria-valuemax={100}
+								>
+									<div
+										className="progress-bar"
+										style={{ width: `${progress}%` }}
+									>
+										{progress}%
+									</div>
+								</div>
+							)}
+							<p className="text-muted small">
+								Scanned PDFs (photos of paper) have no readable text. If yours
+								is one, use "Type or paste" instead.
+							</p>
+						</>
+					) : (
+						<div className="mb-3">
+							<label htmlFor="resume-text" className="form-label">
+								Resume text
+							</label>
+							<textarea
+								id="resume-text"
+								className="form-control"
+								rows={14}
+								maxLength={MAX_TEXT_CHARS}
+								placeholder="Paste your resume here: experience, education and skills"
+								value={text}
+								onChange={(e) => setText(e.target.value)}
+								disabled={saving}
+							/>
+							<div className="form-text">
+								{text.length.toLocaleString()} /{" "}
+								{MAX_TEXT_CHARS.toLocaleString()} characters. Saving this
+								deletes any uploaded resume file.
+							</div>
+						</div>
+					)}
+
 					{error && (
 						<div className="alert alert-danger py-2" role="alert">
 							{error}
 						</div>
 					)}
-					{message && (
-						<div className="alert alert-success py-2" role="status">
-							{message}
-						</div>
-					)}
 
-					<fieldset className="btn-group w-100 mb-4 border-0 p-0">
-						<legend className="visually-hidden">
-							Choose resume input method
-						</legend>
-						<input
-							type="radio"
-							className="btn-check"
-							id="btn-file"
-							autoComplete="off"
-							checked={mode === "file"}
-							onChange={() => setMode("file")}
-							disabled={isBusy}
-						/>
-						<label className="btn btn-outline-primary" htmlFor="btn-file">
-							Upload File
-						</label>
-
-						<input
-							type="radio"
-							className="btn-check"
-							id="btn-text"
-							autoComplete="off"
-							checked={mode === "text"}
-							onChange={() => setMode("text")}
-							disabled={isBusy}
-						/>
-						<label className="btn btn-outline-primary" htmlFor="btn-text">
-							Type Resume
-						</label>
-					</fieldset>
-
-					<form onSubmit={handleSubmit}>
-						{mode === "file" ? (
-							<div className="mb-3">
-								<label htmlFor="resumeFile" className="form-label">
-									Select PDF or DOCX (under 5 MB)
-								</label>
-								<input
-									className="form-control"
-									type="file"
-									id="resumeFile"
-									accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-									onChange={handleFileChange}
-									disabled={isBusy}
-								/>
-							</div>
-						) : (
-							<div className="mb-3">
-								<label htmlFor="resumeText" className="form-label">
-									Paste or Type Resume
-								</label>
-								<textarea
-									className="form-control"
-									id="resumeText"
-									rows="10"
-									maxLength={MAX_RESUME_TEXT_LENGTH}
-									value={text}
-									onChange={(event) => setText(event.target.value)}
-									placeholder="Paste your resume contents here..."
-									disabled={isBusy}
-								/>
-								<div className="form-text text-end">
-									{text.length.toLocaleString()} /{" "}
-									{MAX_RESUME_TEXT_LENGTH.toLocaleString()} characters
-								</div>
-							</div>
-						)}
-
+					<div className="d-flex justify-content-between align-items-center">
 						<button
 							type="submit"
-							className="btn btn-primary w-100"
-							disabled={isBusy}
+							className="btn btn-primary"
+							disabled={!canSubmit}
 						>
-							{busy ? "Saving..." : "Save Resume"}
+							{saving
+								? mode === "file"
+									? "Uploading…"
+									: "Saving…"
+								: mode === "file"
+									? "Upload resume"
+									: "Save resume"}
 						</button>
-					</form>
-
-					<hr className="my-4" />
-					<h5>Resume Text Extraction</h5>
-					<p className="text-muted">
-						Extract text from your most recently uploaded PDF or DOCX resume.
-					</p>
-					<button
-						type="button"
-						className="btn btn-success w-100"
-						onClick={handleExtract}
-						disabled={isBusy}
-					>
-						{extracting ? "Extracting Resume Text..." : "Extract Resume Text"}
-					</button>
-
-					{extractedText && (
-						<div className="mt-4">
-							<h5>Extracted Resume</h5>
-							{extractedFileName && (
-								<p>
-									<strong>File:</strong> {extractedFileName}
-								</p>
-							)}
-							<div
-								className="border rounded p-3 bg-light"
-								style={{
-									whiteSpace: "pre-wrap",
-									overflowWrap: "anywhere",
-									maxHeight: 400,
-									overflowY: "auto",
-								}}
-							>
-								{extractedText}
-							</div>
-							<p className="text-muted mt-2">
-								Characters extracted: {extractedText.length.toLocaleString()}
-							</p>
-						</div>
-					)}
-
-					<hr className="my-4" />
-					<h5>Resume Analysis</h5>
-					<p className="text-muted">
-						Identify skills, education, experience, and occupations from your
-						most recently uploaded resume.
-					</p>
-					<button
-						type="button"
-						className="btn btn-primary w-100"
-						onClick={handleAnalyze}
-						disabled={isBusy}
-					>
-						{analyzing ? "Analyzing Resume..." : "Analyze Resume"}
-					</button>
-
-					{analysis && (
-						<div className="mt-4">
-							<h5>Analysis Results</h5>
-							<p>
-								<strong>File:</strong> {analysis.fileName}
-							</p>
-							<p>
-								<strong>Analysis method:</strong>{" "}
-								{analysis.analysisType === "rule-based"
-									? "Rule-based prototype"
-									: analysis.analysisType || "Unknown"}
-							</p>
-							<p>
-								<strong>Experience:</strong>{" "}
-								{analysis.yearsExperience != null
-									? `${analysis.yearsExperience} years mentioned`
-									: "Not identified"}
-							</p>
-
-							<h6>Identified Skills</h6>
-							{analysis.skills?.length > 0 ? (
-								<div className="mb-3">
-									{analysis.skills.map((skill) => (
-										<span key={skill} className="badge bg-secondary me-2 mb-2">
-											{skill}
-										</span>
-									))}
-								</div>
-							) : (
-								<p className="text-muted">
-									No skills matched the current catalog.
-								</p>
-							)}
-
-							<h6>Education Mentioned</h6>
-							{analysis.education?.length > 0 ? (
-								<ul>
-									{analysis.education.map((degree) => (
-										<li key={degree}>{degree}</li>
-									))}
-								</ul>
-							) : (
-								<p className="text-muted">No degree keywords identified.</p>
-							)}
-
-							<h6>Occupations Mentioned</h6>
-							{analysis.possibleOccupations?.length > 0 ? (
-								<ul>
-									{analysis.possibleOccupations.map((occupation) => (
-										<li key={occupation}>{occupation}</li>
-									))}
-								</ul>
-							) : (
-								<p className="text-muted">
-									No occupations matched the current catalog.
-								</p>
-							)}
-
-							<div className="alert alert-info mt-3">
-								This is preliminary keyword-based analysis, not an AI-generated
-								career recommendation. Review the results for accuracy.
-							</div>
-						</div>
-					)}
-				</div>
+					</div>
+				</form>
 			</div>
 		</div>
 	);
