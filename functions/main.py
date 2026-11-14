@@ -13,6 +13,7 @@ from google.api_core.exceptions import NotFound
 from pypdf import PdfReader
 
 from skillpath.catalog import load_catalog
+from skillpath.education import extract_education
 from skillpath.extraction import extract_skills, get_default_tagger
 from skillpath.text_extract import clean_text
 
@@ -389,17 +390,19 @@ def analyze_resume(request: https_fn.CallableRequest):
         if any(contains_keyword(keyword) for keyword in keywords)
     ]
 
-    education_patterns = {
-        "Doctorate": r"\b(ph\.?d\.?|doctorate|doctoral degree)\b",
-        "Master's Degree": r"\b(m\.?b\.?a\.?|master'?s|m\.?s\.?|m\.?a\.?)\b",
-        "Bachelor's Degree": r"\b(b\.?s\.?|b\.?a\.?|bachelor'?s)\b",
-        "Associate Degree": r"\b(a\.?s\.?|a\.?a\.?|associate'?s)\b",
+    education_details = extract_education(resume_text)
+
+    degree_labels = {
+        "doctorate": "Doctorate",
+        "master": "Master's Degree",
+        "bachelor": "Bachelor's Degree",
+        "associate": "Associate Degree",
     }
-    education = [
-        degree
-        for degree, pattern in education_patterns.items()
-        if re.search(pattern, resume_text, re.IGNORECASE)
-    ]
+
+    education = list(dict.fromkeys(
+        degree_labels[record["degree_level"]]
+        for record in education_details
+    ))
 
     experience_match = re.search(
         r"\b(\d{1,2})\s*\+?\s*years?\s+(?:of\s+)?experience\b",
@@ -432,6 +435,7 @@ def analyze_resume(request: https_fn.CallableRequest):
         "fileName": file_name,
         "skills": identified_skills,
         "education": education,
+        "educationDetails": education_details,
         "yearsExperience": years_experience,
         "possibleOccupations": possible_occupations,
         "skillsCount": len(identified_skills),
