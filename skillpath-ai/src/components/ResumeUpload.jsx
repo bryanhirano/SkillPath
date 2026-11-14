@@ -1,8 +1,8 @@
-import { get, getDatabase, ref as dbRef, set } from "firebase/database";
+import { ref as dbRef, get, getDatabase, set } from "firebase/database";
 import { uploadBytesResumable } from "firebase/storage";
 import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
 	deleteResumeFile,
 	RESUME_PATH_KEY,
@@ -106,14 +106,10 @@ const ResumeUpload = () => {
 		setProgress(0);
 		try {
 			// Uploading to the same path replaces (deletes) the previous file.
-			const task = uploadBytesResumable(
-				resumeFileRef(uid),
-				file,
-				{
-					contentType: file.type || undefined,
-					customMetadata: { originalName: file.name },
-				},
-			);
+			const task = uploadBytesResumable(resumeFileRef(uid), file, {
+				contentType: file.type || undefined,
+				customMetadata: { originalName: file.name },
+			});
 			await new Promise((resolve, reject) => {
 				task.on(
 					"state_changed",
@@ -127,7 +123,10 @@ const ResumeUpload = () => {
 			});
 			// Delete the typed resume too; the server would otherwise keep using it.
 			await set(dbRef(getDatabase(), `users/${uid}/resumeText`), null);
-			await set(dbRef(getDatabase(), `users/${uid}/${RESUME_PATH_KEY}`), `resume/${uid}`);
+			await set(
+				dbRef(getDatabase(), `users/${uid}/${RESUME_PATH_KEY}`),
+				`resume/${uid}`,
+			);
 			navigate("/dashboard");
 		} catch (err) {
 			setError(
@@ -248,9 +247,14 @@ const ResumeUpload = () => {
 							<label
 								htmlFor="resume-file"
 								className={`d-block border border-2 rounded p-4 text-center mb-3 ${
-									dragging ? "border-primary bg-light" : "border-secondary-subtle"
+									dragging
+										? "border-primary bg-light"
+										: "border-secondary-subtle"
 								}`}
-								style={{ borderStyle: "dashed", cursor: saving ? "default" : "pointer" }}
+								style={{
+									borderStyle: "dashed",
+									cursor: saving ? "default" : "pointer",
+								}}
 								onDragOver={(e) => {
 									e.preventDefault();
 									setDragging(true);
@@ -296,14 +300,17 @@ const ResumeUpload = () => {
 									aria-valuemin={0}
 									aria-valuemax={100}
 								>
-									<div className="progress-bar" style={{ width: `${progress}%` }}>
+									<div
+										className="progress-bar"
+										style={{ width: `${progress}%` }}
+									>
 										{progress}%
 									</div>
 								</div>
 							)}
 							<p className="text-muted small">
-								Scanned PDFs (photos of paper) have no readable text. If yours is
-								one, use "Type or paste" instead.
+								Scanned PDFs (photos of paper) have no readable text. If yours
+								is one, use "Type or paste" instead.
 							</p>
 						</>
 					) : (
@@ -322,8 +329,9 @@ const ResumeUpload = () => {
 								disabled={saving}
 							/>
 							<div className="form-text">
-								{text.length.toLocaleString()} / {MAX_TEXT_CHARS.toLocaleString()}{" "}
-								characters. Saving this deletes any uploaded resume file.
+								{text.length.toLocaleString()} /{" "}
+								{MAX_TEXT_CHARS.toLocaleString()} characters. Saving this
+								deletes any uploaded resume file.
 							</div>
 						</div>
 					)}
@@ -335,8 +343,11 @@ const ResumeUpload = () => {
 					)}
 
 					<div className="d-flex justify-content-between align-items-center">
-						
-						<button type="submit" className="btn btn-primary" disabled={!canSubmit}>
+						<button
+							type="submit"
+							className="btn btn-primary"
+							disabled={!canSubmit}
+						>
 							{saving
 								? mode === "file"
 									? "Uploading…"

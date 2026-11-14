@@ -336,7 +336,6 @@ export async function userHasResumeUploaded() {
 	await user.getIdToken();
 
 	try {
-
 		const [pathSnapshot, textSnapshot] = await Promise.all([
 			get(child(dbRef, `users/${user.uid}/resumePath`)),
 			get(child(dbRef, `users/${user.uid}/resumeText`)),

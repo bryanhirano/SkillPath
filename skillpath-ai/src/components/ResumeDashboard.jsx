@@ -1,5 +1,5 @@
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -30,7 +30,12 @@ const DEGREE_ORDER = [
 	"Bachelor's Degree",
 	"Associate Degree",
 ];
-const EMPTY_RESULTS = { text: null, skills: null, analysis: null, target: null };
+const EMPTY_RESULTS = {
+	text: null,
+	skills: null,
+	analysis: null,
+	target: null,
+};
 
 // Saved target job + latest gap analysis (written by the Skills page).
 const loadTargetJob = () =>
@@ -38,7 +43,9 @@ const loadTargetJob = () =>
 		.then(({ data }) => data)
 		.catch((err) => {
 			console.error("list_target_roles failed:", err);
-			throw new Error("Your target job couldn't be loaded. Press Refresh to try again.");
+			throw new Error(
+				"Your target job couldn't be loaded. Press Refresh to try again.",
+			);
 		});
 
 const formatCategory = (category) =>
@@ -87,7 +94,10 @@ const SkillEvidence = ({ name, evidence }) => {
 		const rect = anchor.current?.getBoundingClientRect();
 		if (!rect) return;
 		const width = Math.min(360, window.innerWidth - 16);
-		const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+		const left = Math.max(
+			8,
+			Math.min(rect.left, window.innerWidth - width - 8),
+		);
 		// Below the name, or above it when there isn't room underneath.
 		const roomBelow = window.innerHeight - rect.bottom > 170;
 		setPos(
@@ -96,7 +106,7 @@ const SkillEvidence = ({ name, evidence }) => {
 				: { left, width, bottom: window.innerHeight - rect.top + 6 },
 		);
 	};
-	const close = () => setPos(null);
+	const close = useCallback(() => setPos(null), []);
 
 	// Close when the page scrolls or resizes, since the popup is fixed in place.
 	useEffect(() => {
@@ -107,7 +117,7 @@ const SkillEvidence = ({ name, evidence }) => {
 			window.removeEventListener("scroll", close, true);
 			window.removeEventListener("resize", close);
 		};
-	}, [pos]);
+	}, [pos, close]);
 
 	return (
 		<>
@@ -134,7 +144,12 @@ const SkillEvidence = ({ name, evidence }) => {
 				<div
 					role="tooltip"
 					className="bg-dark text-white rounded shadow p-2 small"
-					style={{ position: "fixed", zIndex: 1080, pointerEvents: "none", ...pos }}
+					style={{
+						position: "fixed",
+						zIndex: 1080,
+						pointerEvents: "none",
+						...pos,
+					}}
 				>
 					<div className="fw-semibold mb-1">Found in your resume</div>
 					{lines.length > 0 ? (
@@ -183,8 +198,8 @@ const TargetJobCard = ({ target, error }) => {
 					<SectionError message={error} />
 				) : !saved ? (
 					<p className="text-muted mb-0">
-						You haven't chosen a job to aim for yet. Pick one on the Skills
-						page to see how your skills compare.
+						You haven't chosen a job to aim for yet. Pick one on the Skills page
+						to see how your skills compare.
 					</p>
 				) : (
 					<>
@@ -225,9 +240,7 @@ const TargetJobCard = ({ target, error }) => {
 								</div>
 								{gaps.length > 0 ? (
 									<>
-										<div className="small text-muted mb-1">
-											Skills to build
-										</div>
+										<div className="small text-muted mb-1">Skills to build</div>
 										<ul className="list-unstyled mb-0">
 											{gaps.slice(0, 5).map((gap) => (
 												<li
@@ -262,8 +275,8 @@ const TargetJobCard = ({ target, error }) => {
 							</>
 						) : (
 							<p className="text-muted mb-0">
-								No comparison yet. Open the Skills page and press "Update
-								target job" to compare your skills with this job.
+								No comparison yet. Open the Skills page and press "Update target
+								job" to compare your skills with this job.
 							</p>
 						)}
 					</>
@@ -324,7 +337,10 @@ const ResumeDashboard = () => {
 			const text = settle(textResult, "Resume text extraction failed.");
 			const skills = settle(skillsResult, "Skill identification failed.");
 			const analysis = settle(analysisResult, "Resume analysis failed.");
-			const target = settle(targetResult, "Your target job couldn't be loaded.");
+			const target = settle(
+				targetResult,
+				"Your target job couldn't be loaded.",
+			);
 
 			setResults({
 				text: text.value,
@@ -534,7 +550,8 @@ const ResumeDashboard = () => {
 									</div>
 									<p className="text-muted small mt-3 mb-0">
 										Levels are estimated from how each skill is described in
-										your resume. Hover over or tap a skill to see where it was found.
+										your resume. Hover over or tap a skill to see where it was
+										found.
 									</p>
 								</>
 							)}

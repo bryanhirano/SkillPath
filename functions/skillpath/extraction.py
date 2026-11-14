@@ -250,6 +250,65 @@ def _lvl(level: int) -> str:
     return f"{LEVEL_NAMES[level]} ({level})"
 
 
+def _nearby_years(mentions: list[tuple[str, str]]) -> list[tuple[int, str]]:
+    """Find experience durations stated close to each mentioned skill."""
+    years = []
+    for sentence, text in mentions:
+        pos = sentence.lower().find(text.lower())
+        for match in YEARS.finditer(sentence):
+            near_start = abs(match.end() - pos) <= YEARS_WINDOW
+            near_end = abs(match.start() - (pos + len(text))) <= YEARS_WINDOW
+            if pos >= 0 and (near_start or near_end):
+                years.append((int(match.group(1)), match.group(0).strip()))
+    return years
+
+
+def _apply_year_adjustment(
+    level: int, years: list[tuple[int, str]], reasons: list[str]
+) -> int:
+    """Apply the proficiency floor implied by the strongest nearby duration."""
+    if not years:
+        return level
+
+    years_count, phrase = max(years)
+    floor = 2 if years_count < 1 else 3 if years_count <= 2 else 4 if years_count <= 5 else 5
+    if floor > level:
+        reasons.append(f"\u201c{phrase}\u201d stated next to it: raised to {_lvl(floor)}.")
+        return floor
+
+    reasons.append(
+        f"\u201c{phrase}\u201d stated next to it: supports {_lvl(floor)}, "
+        "no change."
+    )
+    return level
+
+
+def _apply_cue_adjustments(level: int, sentences: list[str], reasons: list[str]) -> int:
+    """Adjust proficiency for strong or beginner wording."""
+    strong = next((m.group(0) for s in sentences if (m := STRONG_CUES.search(s))), None)
+    if strong:
+        new_level = min(5, level + 1)
+        reasons.append(
+            f"Strong wording (\u201c{strong}\u201d): +1 to {_lvl(new_level)}."
+            if new_level > level
+            else f"Strong wording (\u201c{strong}\u201d): already at the maximum."
+        )
+        level = new_level
+
+    if sentences and all(WEAK_CUES.search(s) for s in sentences):
+        weak = WEAK_CUES.search(sentences[0]).group(0)
+        if level > 2:
+            reasons.append(
+                f"Only described with beginner wording (\u201c{weak}\u201d): "
+                f"capped at {_lvl(2)}."
+            )
+        else:
+            reasons.append(f"Beginner wording (\u201c{weak}\u201d) keeps it at {_lvl(level)}.")
+        level = min(level, 2)
+
+    return level
+
+
 def explain_level(mentions: list[tuple[str, str]]) -> tuple[int, list[str]]:
     """Heuristic 1-5 proficiency estimate, plus one plain sentence per rule applied.
 
@@ -267,46 +326,9 @@ def explain_level(mentions: list[tuple[str, str]]) -> tuple[int, list[str]]:
         + ("" if n >= 3 else f" 3 or more mentions would start at {_lvl(3)}.")
     ]
 
-    years: list[tuple[int, str]] = []
-    for sentence, text in unique:
-        pos = sentence.lower().find(text.lower())
-        for m in YEARS.finditer(sentence):
-            near_start = abs(m.end() - pos) <= YEARS_WINDOW
-            near_end = abs(m.start() - (pos + len(text))) <= YEARS_WINDOW
-            if pos >= 0 and (near_start or near_end):
-                years.append((int(m.group(1)), m.group(0).strip()))
-    if years:
-        y, phrase = max(years)
-        floor = 2 if y < 1 else 3 if y <= 2 else 4 if y <= 5 else 5
-        if floor > level:
-            reasons.append(f"\u201c{phrase}\u201d stated next to it: raised to {_lvl(floor)}.")
-            level = floor
-        else:
-            reasons.append(
-                f"\u201c{phrase}\u201d stated next to it: supports {_lvl(floor)}, "
-                "no change."
-            )
-
-    strong = next((m.group(0) for s in sentences if (m := STRONG_CUES.search(s))), None)
-    if strong:
-        new = min(5, level + 1)
-        reasons.append(
-            f"Strong wording (\u201c{strong}\u201d): +1 to {_lvl(new)}."
-            if new > level
-            else f"Strong wording (\u201c{strong}\u201d): already at the maximum."
-        )
-        level = new
-
-    if sentences and all(WEAK_CUES.search(s) for s in sentences):
-        weak = WEAK_CUES.search(sentences[0]).group(0)
-        if level > 2:
-            reasons.append(
-                f"Only described with beginner wording (\u201c{weak}\u201d): "
-                f"capped at {_lvl(2)}."
-            )
-        else:
-            reasons.append(f"Beginner wording (\u201c{weak}\u201d) keeps it at {_lvl(level)}.")
-        level = min(level, 2)
+    years = _nearby_years(unique)
+    level = _apply_year_adjustment(level, years, reasons)
+    level = _apply_cue_adjustments(level, sentences, reasons)
 
     return max(1, min(5, level)), reasons
 

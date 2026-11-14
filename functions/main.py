@@ -37,8 +37,10 @@ initialize_app(
     }
 )
 
-# Imported after initialize_app() so these handlers share the configured app.
+# Import after initialization to register these handlers with the configured app.
+# pylint: disable=wrong-import-position,unused-import
 from target_job import list_target_roles, select_target_role  # noqa: E402,F401
+# pylint: enable=wrong-import-position,unused-import
 
 
 def _resume_path(uid):

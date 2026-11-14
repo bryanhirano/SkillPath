@@ -41,7 +41,10 @@ const DEFAULT_PREFS = {
 // Course catalogs searched for every step, so each skill has somewhere to learn
 // even when resources.json has no curated entry for it.
 const SEARCH_SITES = [
-	{ name: "Coursera", url: (q) => `https://www.coursera.org/search?query=${q}` },
+	{
+		name: "Coursera",
+		url: (q) => `https://www.coursera.org/search?query=${q}`,
+	},
 	{ name: "edX", url: (q) => `https://www.edx.org/search?q=${q}` },
 	{
 		name: "YouTube",
@@ -124,7 +127,11 @@ const StepCard = ({ step }) => {
 					{SEARCH_SITES.map((site, i) => (
 						<span key={site.name}>
 							{i > 0 && " · "}
-							<a href={site.url(query)} target="_blank" rel="noopener noreferrer">
+							<a
+								href={site.url(query)}
+								target="_blank"
+								rel="noopener noreferrer"
+							>
 								{site.name}
 							</a>
 						</span>
@@ -185,7 +192,9 @@ const PreferencesForm = ({ initial, busy, onSubmit }) => {
 							id="pref-pace"
 							className="form-select"
 							value={prefs.pace}
-							onChange={(e) => setPrefs((p) => ({ ...p, pace: e.target.value }))}
+							onChange={(e) =>
+								setPrefs((p) => ({ ...p, pace: e.target.value }))
+							}
 						>
 							{PACES.map((p) => (
 								<option key={p.id} value={p.id}>
@@ -222,13 +231,20 @@ const PreferencesForm = ({ initial, busy, onSubmit }) => {
 								checked={prefs.formats.includes(f.id)}
 								onChange={() => toggleFormat(f.id)}
 							/>
-							<label htmlFor={`pref-format-${f.id}`} className="form-check-label">
+							<label
+								htmlFor={`pref-format-${f.id}`}
+								className="form-check-label"
+							>
 								{f.label}
 							</label>
 						</div>
 					))}
 				</div>
-				<button type="submit" className="btn btn-primary mt-3" disabled={!valid || busy}>
+				<button
+					type="submit"
+					className="btn btn-primary mt-3"
+					disabled={!valid || busy}
+				>
 					{busy ? "Building your plan…" : "Update training plan"}
 				</button>
 			</div>
@@ -258,12 +274,17 @@ const Training = () => {
 				setSavedTarget(saved);
 				// Only use the plan if it was built for the job currently selected.
 				setAnalysis(
-					saved && latest?.target?.title === saved.resolvedTitle ? latest : null,
+					saved && latest?.target?.title === saved.resolvedTitle
+						? latest
+						: null,
 				);
 			})
 			.catch((err) => {
 				console.error("list_target_roles failed:", err);
-				if (!cancelled) setError("Your training plan couldn't be loaded. Please reload the page.");
+				if (!cancelled)
+					setError(
+						"Your training plan couldn't be loaded. Please reload the page.",
+					);
 			})
 			.finally(() => {
 				if (!cancelled) setLoading(false);
@@ -280,11 +301,16 @@ const Training = () => {
 		try {
 			const { skills = [] } = await call("identify_resume_skills");
 			if (skills.length === 0) {
-				throw new Error("No skills were found in your resume. Upload a resume first.");
+				throw new Error(
+					"No skills were found in your resume. Upload a resume first.",
+				);
 			}
 			const target = savedTarget.roleId
 				? { roleId: savedTarget.roleId }
-				: { title: savedTarget.title, jobDescription: savedTarget.jobDescription };
+				: {
+						title: savedTarget.title,
+						jobDescription: savedTarget.jobDescription,
+					};
 			const data = await call("select_target_role", {
 				target,
 				skills: skills.map(({ skillId, level }) => ({ skillId, level })),
@@ -344,8 +370,8 @@ const Training = () => {
 				<div className="card shadow-sm">
 					<div className="card-body">
 						<p className="mb-3">
-							Choose the job you want first. Your training plan is built from the
-							skills that job needs and the skills on your resume.
+							Choose the job you want first. Your training plan is built from
+							the skills that job needs and the skills on your resume.
 						</p>
 						<Link to="/skills" className="btn btn-primary">
 							Choose a target job
@@ -369,15 +395,15 @@ const Training = () => {
 						<div className="card shadow-sm">
 							<div className="card-body">
 								<p className="mb-0">
-									No training plan for this job yet. Set your preferences above and
-									press <strong>Update training plan</strong> to build one.
+									No training plan for this job yet. Set your preferences above
+									and press <strong>Update training plan</strong> to build one.
 								</p>
 							</div>
 						</div>
 					) : steps.length === 0 ? (
 						<div className="alert alert-success" role="status">
-							You already meet every requirement for {savedTarget.resolvedTitle}.
-							No training needed.
+							You already meet every requirement for {savedTarget.resolvedTitle}
+							. No training needed.
 						</div>
 					) : (
 						<>

@@ -1,3 +1,5 @@
+"""Tests for O*NET occupation profile normalization."""
+
 import json
 import unittest
 from dataclasses import asdict
@@ -18,7 +20,10 @@ from skillpath.onet_job_profiler import (
 
 
 class GetOccupationProfileTests(unittest.TestCase):
+    """Test retrieval and normalization of occupation profile sections."""
+
     def test_returns_flattened_profile_sections(self) -> None:
+        """Normalize API responses into flat, serializable profile objects."""
         responses = [
             {
                 "response": [

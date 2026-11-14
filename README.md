@@ -1,5 +1,7 @@
 # React + Vite
+
 SkillPath is a career development application designed to help users identify skill gaps and explore learning pathways toward their target occupations.
+
 ## Resume upload, extraction, and analysis
 
 Signed-in users can save resume text or upload a PDF/DOCX file smaller than 5 MB.
