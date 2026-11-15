@@ -374,9 +374,7 @@ const ResumeDashboard = () => {
 	const { text, skills, analysis } = results;
 	const nothingLoaded = !text && !skills && !analysis;
 	const advancedCount = skills?.filter((s) => s.level >= 4).length ?? 0;
-	const highestDegree = DEGREE_ORDER.find((degree) =>
-		analysis?.education?.includes(degree),
-	);
+
 
 	return (
 		<div className="container mt-4 mb-5">
@@ -462,24 +460,8 @@ const ResumeDashboard = () => {
 				</>
 			) : (
 				<>
-					{/* Summary tiles */}
-					<div className="row g-3 mb-4">
-						<StatCard label="Skills identified" value={skills?.length ?? "—"} />
-						<StatCard
-							label="Advanced or expert"
-							value={skills ? advancedCount : "—"}
-							hint="estimated"
-						/>
-						<StatCard
-							label="Experience"
-							value={
-								analysis?.yearsExperience != null
-									? `${analysis.yearsExperience} yrs`
-									: "—"
-							}
-						/>
-						<StatCard label="Highest education" value={highestDegree ?? "—"} />
-					</div>
+			
+					
 
 					<TargetJobCard target={target} error={targetError} />
 
@@ -552,47 +534,7 @@ const ResumeDashboard = () => {
 						</div>
 					</div>
 
-					{/* Education and occupations */}
-					<div className="row g-3 mb-4">
-						<div className="col-md-6">
-							<div className="card shadow-sm h-100">
-								<div className="card-header">Education Mentioned</div>
-								<div className="card-body">
-									{errors.analysis ? (
-										<SectionError message={errors.analysis} />
-									) : analysis?.education?.length > 0 ? (
-										<ul className="mb-0">
-											{analysis.education.map((degree) => (
-												<li key={degree}>{degree}</li>
-											))}
-										</ul>
-									) : (
-										<p className="text-muted mb-0">No degrees identified.</p>
-									)}
-								</div>
-							</div>
-						</div>
-						<div className="col-md-6">
-							<div className="card shadow-sm h-100">
-								<div className="card-header">Occupations Mentioned</div>
-								<div className="card-body">
-									{errors.analysis ? (
-										<SectionError message={errors.analysis} />
-									) : analysis?.possibleOccupations?.length > 0 ? (
-										<ul className="mb-0">
-											{analysis.possibleOccupations.map((occupation) => (
-												<li key={occupation}>{occupation}</li>
-											))}
-										</ul>
-									) : (
-										<p className="text-muted mb-0">
-											No occupations identified.
-										</p>
-									)}
-								</div>
-							</div>
-						</div>
-					</div>
+				
 
 					{/* Extracted text */}
 					<div className="card shadow-sm">

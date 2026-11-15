@@ -7,6 +7,7 @@ import {
 	GoogleAuthProvider,
 	getAdditionalUserInfo,
 	getAuth,
+	onAuthStateChanged,
 	sendPasswordResetEmail,
 	setPersistence,
 	signInWithEmailAndPassword,
@@ -14,7 +15,15 @@ import {
 	signOut,
 	updateProfile,
 } from "firebase/auth";
-import { child, connectDatabaseEmulator, get, getDatabase, ref, update } from "firebase/database";
+import {
+	child,
+	connectDatabaseEmulator,
+	get,
+	getDatabase,
+	onValue,
+	ref,
+	update,
+} from "firebase/database";
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from "firebase/functions";
 import {
 	connectStorageEmulator,
@@ -177,7 +186,6 @@ export function getInfo(parent) {
 				resolve(snapshot.val());
 			})
 			.catch((error) => {
-				console.error(error);
 				reject(error);
 			});
 	});
@@ -252,14 +260,14 @@ export const _deleteUser = () => {
 			update(ref(data), updates);
 
 			deleteObject(uidImg).catch((error) => {
-				console.log(error);
+				
 			});
 
 			alert("Your account has been deleted");
 		})
 		.catch((error) => {
 			alert("Please log out, log in, and try again");
-			console.log(error);
+			
 		});
 };
 
@@ -365,6 +373,59 @@ export async function userHasResumeUploaded() {
 		console.error("Could not check for a saved resume:", error);
 		return false;
 	}
+}
+
+// NEW: watch whether the signed-in user has a resume (uploaded or typed).
+// onChange(hasResume) is called once with the current status and then only
+// when the status actually flips - after an upload, a typed save, a delete,
+// or a sign-in/sign-out. Nothing is called for re-renders or unrelated writes.
+// Returns a function that stops watching; return it from a useEffect.
+export function subscribeToResumeStatus(onChange) {
+	const isFilled = (value) => typeof value === "string" && value.trim() !== "";
+	let last;
+	const emit = (hasResume) => {
+		if (hasResume === last) return;
+		last = hasResume;
+		onChange(hasResume);
+	};
+
+	let stopData = () => {};
+	const stopAuth = onAuthStateChanged(auth, (user) => {
+		stopData();
+		stopData = () => {};
+		if (!user) {
+			emit(false);
+			return;
+		}
+
+		const values = {};
+		const watch = (key) =>
+			onValue(
+				ref(data, `users/${user.uid}/${key}`),
+				(snapshot) => {
+					values[key] = snapshot.val();
+					// Wait until both keys have loaded before reporting.
+					if ("resumePath" in values && "resumeText" in values) {
+						emit(isFilled(values.resumePath) || isFilled(values.resumeText));
+					}
+				},
+				(error) => {
+					console.error("Could not watch the saved resume:", error);
+					emit(false);
+				},
+			);
+		const stopPath = watch("resumePath");
+		const stopText = watch("resumeText");
+		stopData = () => {
+			stopPath();
+			stopText();
+		};
+	});
+
+	return () => {
+		stopAuth();
+		stopData();
+	};
 }
 
 // NEW: save the job the user chose and compare their skills with it.

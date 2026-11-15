@@ -1,11 +1,19 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { _signOut, userHasResumeUploaded } from "../backend/firebase"; // Adjust path if needed
+import { _signOut, subscribeToResumeStatus } from "../backend/firebase"; // Adjust path if needed
 
 // Pages in the order a user works through them.
+const RESUME_ONLY_PAGES = [{ to: "/resume", label: "My Resume" }];
+const ALL_PAGES = [
+	{ to: "/resume", label: "My Resume" },
+	{ to: "/dashboard", label: "Dashboard" },
+	{ to: "/skills", label: "Skills & Target Job" },
+	{ to: "/training", label: "Training Plan" },
+];
 
 const Toolbar = () => {
-	const [pages, setPages] = useState([]);
+	const [hasResume, setHasResume] = useState(false);
+	const pages = hasResume ? ALL_PAGES : RESUME_ONLY_PAGES;
 
 	const navigate = useNavigate();
 	// The menu is collapsed into a button on small screens.
@@ -19,29 +27,21 @@ const Toolbar = () => {
 		});
 	};
 
-	useEffect(() => {
-		async function checkResume() {
-			var hasResume = await userHasResumeUploaded();
-			console.log(`${hasResume}hasResume`);
-			hasResume
-				? setPages([
-						{ to: "/resume", label: "My Resume" },
-						{ to: "/dashboard", label: "Dashboard" },
-						{ to: "/skills", label: "Skills & Target Job" },
-						{ to: "/training", label: "Training Plan" },
-					])
-				: setPages([{ to: "/resume", label: "My Resume" }]);
-		}
-		checkResume();
-		console.log(`${pages[0]}pages`);
-	});
+	// Runs once when the toolbar mounts. After that, setHasResume is called
+	// only when the resume status changes (upload, typed save, delete,
+	// sign-in/out) - not on every render.
+	useEffect(() => subscribeToResumeStatus(setHasResume), []);
 
 	// app-toolbar (layout.css) keeps the bar at the top while the page scrolls.
 	return (
 		<nav className="app-toolbar navbar navbar-expand-lg navbar-dark bg-primary shadow-sm mb-4">
 			<div className="container-fluid">
 				{/* Brand Logo / Home Link */}
-				<Link className="navbar-brand fw-bold" to="/dashboard" onClick={close}>
+				<Link
+					className="navbar-brand fw-bold"
+					to={hasResume ? "/dashboard" : "/resume"}
+					onClick={close}
+				>
 					SkillPath
 				</Link>
 

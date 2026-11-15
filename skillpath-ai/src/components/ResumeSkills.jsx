@@ -136,20 +136,11 @@ const TargetJobPicker = ({
 						<label className="btn btn-outline-primary btn-sm" htmlFor="target-mode-role">
 							Choose a job
 						</label>
-						<input
-							type="radio"
-							className="btn-check"
-							name="target-mode"
-							id="target-mode-jd"
-							checked={mode === "jd"}
-							onChange={() => setMode("jd")}
-						/>
-						<label className="btn btn-outline-primary btn-sm" htmlFor="target-mode-jd">
-							Paste a job description
-						</label>
+					
+						
 					</div>
 
-					{mode === "role" ? (
+			
 						<div className="mb-3">
 							<label htmlFor="target-role" className="form-label">
 								Which job are you aiming for?
@@ -180,41 +171,7 @@ const TargetJobPicker = ({
 								</div>
 							)}
 						</div>
-					) : (
-						<>
-							<div className="mb-3">
-								<label htmlFor="target-title" className="form-label">
-									Job title
-								</label>
-								<input
-									id="target-title"
-									className="form-control"
-									maxLength={80}
-									placeholder="e.g. Junior Data Analyst"
-									value={jdTitle}
-									onChange={(e) => setJdTitle(e.target.value)}
-								/>
-							</div>
-							<div className="mb-3">
-								<label htmlFor="target-jd" className="form-label">
-									Job description
-								</label>
-								<textarea
-									id="target-jd"
-									className="form-control"
-									rows={6}
-									maxLength={20000}
-									placeholder="Paste the full job posting here"
-									value={jdText}
-									onChange={(e) => setJdText(e.target.value)}
-								/>
-								<div className="form-text">
-									We pick out the skills the posting asks for. Paste at least a
-									few sentences.
-								</div>
-							</div>
-						</>
-					)}
+					
 
 					<button type="submit" className="btn btn-primary" disabled={!canSubmit}>
 						{saving
