@@ -1,3 +1,4 @@
+import { ref as dbRef, getDatabase, set } from "firebase/database";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { useCallback, useEffect, useState } from "react";
 import { useSelector } from "react-redux";
@@ -25,7 +26,13 @@ const STATUS_BADGE = {
  * Lets the user pick a prospective job (a catalog role or a pasted job
  * description) and shows how their identified skills compare to it.
  */
-const TargetJobPicker = ({ uid, skills, skillsLoading }) => {
+const TargetJobPicker = ({
+	uid,
+	skills,
+	skillsLoading,
+	levelsChanged,
+	onAnalyzed,
+}) => {
 	const [roles, setRoles] = useState([]);
 	const [rolesLoading, setRolesLoading] = useState(false);
 	const [rolesError, setRolesError] = useState("");
@@ -92,6 +99,7 @@ const TargetJobPicker = ({ uid, skills, skillsLoading }) => {
 			.then(({ data }) => {
 				setSavedTarget(data?.target ?? null);
 				setAnalysis(data?.analysis ?? null);
+				onAnalyzed?.();
 			})
 			.catch((err) => setSaveError(err.message))
 			.finally(() => setSaving(false));
@@ -115,7 +123,8 @@ const TargetJobPicker = ({ uid, skills, skillsLoading }) => {
 				)}
 
 				<form onSubmit={handleSubmit}>
-					<div className="btn-group mb-3" role="group" aria-label="Target type">
+					<fieldset className="btn-group mb-3">
+						<legend className="visually-hidden">Target type</legend>
 						<input
 							type="radio"
 							className="btn-check"
@@ -124,7 +133,10 @@ const TargetJobPicker = ({ uid, skills, skillsLoading }) => {
 							checked={mode === "role"}
 							onChange={() => setMode("role")}
 						/>
-						<label className="btn btn-outline-primary btn-sm" htmlFor="target-mode-role">
+						<label
+							className="btn btn-outline-primary btn-sm"
+							htmlFor="target-mode-role"
+						>
 							Choose a job
 						</label>
 						<input
@@ -135,10 +147,13 @@ const TargetJobPicker = ({ uid, skills, skillsLoading }) => {
 							checked={mode === "jd"}
 							onChange={() => setMode("jd")}
 						/>
-						<label className="btn btn-outline-primary btn-sm" htmlFor="target-mode-jd">
+						<label
+							className="btn btn-outline-primary btn-sm"
+							htmlFor="target-mode-jd"
+						>
 							Paste a job description
 						</label>
-					</div>
+					</fieldset>
 
 					{mode === "role" ? (
 						<div className="mb-3">
@@ -165,7 +180,9 @@ const TargetJobPicker = ({ uid, skills, skillsLoading }) => {
 								<div className="form-text">
 									{selectedRole.onetCode &&
 										`O*NET ${selectedRole.onetCode}${
-											selectedRole.onetTitle ? ` · ${selectedRole.onetTitle}` : ""
+											selectedRole.onetTitle
+												? ` · ${selectedRole.onetTitle}`
+												: ""
 										} · `}
 									{selectedRole.requirementCount} required skills
 								</div>
@@ -207,7 +224,11 @@ const TargetJobPicker = ({ uid, skills, skillsLoading }) => {
 						</>
 					)}
 
-					<button type="submit" className="btn btn-primary" disabled={!canSubmit}>
+					<button
+						type="submit"
+						className="btn btn-primary"
+						disabled={!canSubmit}
+					>
 						{saving
 							? "Comparing…"
 							: savedTarget
@@ -216,7 +237,8 @@ const TargetJobPicker = ({ uid, skills, skillsLoading }) => {
 					</button>
 					{!skillsLoading && skills.length === 0 && (
 						<span className="text-muted small ms-3">
-							Upload a resume to compare your skills. You can still save a target.
+							Upload a resume to compare your skills. You can still save a
+							target.
 						</span>
 					)}
 				</form>
@@ -227,6 +249,13 @@ const TargetJobPicker = ({ uid, skills, skillsLoading }) => {
 					</div>
 				)}
 
+				{analysis && !saving && levelsChanged && (
+					<div className="alert alert-warning py-2 mt-3 mb-0" role="status">
+						You changed your skill levels. Press{" "}
+						<strong>Update target job</strong> to refresh this comparison and
+						your training plan.
+					</div>
+				)}
 				{analysis && !saving && <TargetComparison analysis={analysis} />}
 			</div>
 		</div>
@@ -253,7 +282,10 @@ const TargetComparison = ({ analysis }) => {
 				aria-valuemin={0}
 				aria-valuemax={100}
 			>
-				<div className="progress-bar bg-success" style={{ width: `${readiness}%` }} />
+				<div
+					className="progress-bar bg-success"
+					style={{ width: `${readiness}%` }}
+				/>
 			</div>
 			{analysis.summary && <p className="mb-3">{analysis.summary}</p>}
 
@@ -277,7 +309,9 @@ const TargetComparison = ({ analysis }) => {
 									</td>
 									<td>{gap.requiredLabel ?? LEVEL_LABELS[gap.required]}</td>
 									<td>
-										<span className={`badge ${STATUS_BADGE[gap.status] ?? "bg-secondary"}`}>
+										<span
+											className={`badge ${STATUS_BADGE[gap.status] ?? "bg-secondary"}`}
+										>
 											{gap.status}
 										</span>
 									</td>
@@ -296,7 +330,9 @@ const TargetComparison = ({ analysis }) => {
 
 			{strengths.length > 0 && (
 				<div>
-					<div className="small text-muted mb-1">Already meets the requirement</div>
+					<div className="small text-muted mb-1">
+						Already meets the requirement
+					</div>
 					{strengths.map((s) => (
 						<span
 							key={s.skillId}
@@ -308,6 +344,127 @@ const TargetComparison = ({ analysis }) => {
 				</div>
 			)}
 		</div>
+	);
+};
+
+/**
+ * One skill: its level (editable), where it came from, and how the estimate
+ * was worked out. The user's own level is saved to users/{uid}/skillLevels
+ * and applied by identify_resume_skills everywhere else in the app.
+ */
+const SkillLevelRow = ({ uid, skill, onChange }) => {
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState("");
+	const estimated = skill.estimatedLevel ?? skill.level;
+	const reasons = skill.levelReasons ?? [];
+	const evidence = skill.evidence ?? [];
+
+	const save = async (level) => {
+		// Picking the estimate again removes the override.
+		const value = level === estimated ? null : level;
+		const previous = skill;
+		onChange({ ...skill, level, userSet: value !== null });
+		setSaving(true);
+		setError("");
+		try {
+			await set(
+				dbRef(getDatabase(), `users/${uid}/skillLevels/${skill.skillId}`),
+				value,
+			);
+		} catch (err) {
+			onChange(previous);
+			setError(
+				`Couldn't save${err?.code ? ` (${err.code})` : ""}. Please try again.`,
+			);
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	return (
+		<li className="list-group-item">
+			<div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+				<div>
+					<span className="fw-semibold">{skill.name}</span>
+					<span
+						className={`badge ms-2 fw-normal ${
+							skill.userSet
+								? "bg-primary-subtle text-primary-emphasis"
+								: "bg-secondary-subtle text-secondary-emphasis"
+						}`}
+					>
+						{skill.userSet
+							? `Set by you · estimate was ${LEVEL_LABELS[estimated]}`
+							: "Estimated from your resume"}
+					</span>
+				</div>
+				<div className="d-flex align-items-center gap-2">
+					<label className="visually-hidden" htmlFor={`level-${skill.skillId}`}>
+						Your level in {skill.name}
+					</label>
+					<select
+						id={`level-${skill.skillId}`}
+						className="form-select form-select-sm"
+						style={{ width: "auto" }}
+						value={skill.level}
+						disabled={saving}
+						onChange={(e) => save(Number(e.target.value))}
+					>
+						{LEVEL_LABELS.map((label, level) => (
+							<option key={label} value={level}>
+								{level === 0
+									? "None, I don't have this"
+									: `${level} · ${label}`}
+								{level === estimated ? " (estimate)" : ""}
+							</option>
+						))}
+					</select>
+					{skill.userSet && (
+						<button
+							type="button"
+							className="btn btn-sm btn-link px-0"
+							onClick={() => save(estimated)}
+							disabled={saving}
+						>
+							Use estimate
+						</button>
+					)}
+				</div>
+			</div>
+			<details className="mt-1">
+				<summary className="small text-muted">
+					How was {LEVEL_LABELS[estimated]} estimated?
+				</summary>
+				<div className="small mt-2">
+					{reasons.length > 0 ? (
+						<ol className="mb-2 ps-3">
+							{reasons.map((r) => (
+								<li key={r}>{r}</li>
+							))}
+						</ol>
+					) : (
+						<p className="mb-2">
+							Estimated from how often and how strongly the skill is described
+							in your resume.
+						</p>
+					)}
+					{evidence.length > 0 && (
+						<>
+							<div className="text-muted">Where it appears:</div>
+							{evidence.map((line) => (
+								<div key={line} className="fst-italic">
+									“{line}”
+								</div>
+							))}
+						</>
+					)}
+					<p className="text-muted mb-0 mt-2">
+						This is a starting point. If it's wrong, pick your real level above.
+					</p>
+				</div>
+			</details>
+			{error && <div className="text-danger small mt-1">{error}</div>}
+		</li>
 	);
 };
 
@@ -324,6 +481,13 @@ const ResumeSkills = ({ refreshKey }) => {
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState("");
 	const [reloadCount, setReloadCount] = useState(0);
+	// True once a level is changed after the comparison on screen was made.
+	const [levelsChanged, setLevelsChanged] = useState(false);
+
+	const updateSkill = useCallback((next) => {
+		setSkills((all) => all.map((s) => (s.skillId === next.skillId ? next : s)));
+		setLevelsChanged(true);
+	}, []);
 
 	const refresh = useCallback(() => setReloadCount((n) => n + 1), []);
 
@@ -389,17 +553,23 @@ const ResumeSkills = ({ refreshKey }) => {
 							{error}
 						</div>
 					) : skills.length > 0 ? (
-						<div>
-							{skills.map((skill) => (
-								<span
-									key={skill.skillId}
-									className="badge bg-primary me-2 mb-2 fs-6 fw-normal"
-									title={LEVEL_LABELS[skill.level]}
-								>
-									{skill.name}
-								</span>
-							))}
-						</div>
+						<>
+							<p className="text-muted small">
+								Levels were estimated from your resume. Check each one and
+								change any that are wrong. Your levels are used for your target
+								job comparison and training plan.
+							</p>
+							<ul className="list-group">
+								{skills.map((skill) => (
+									<SkillLevelRow
+										key={skill.skillId}
+										uid={uid}
+										skill={skill}
+										onChange={updateSkill}
+									/>
+								))}
+							</ul>
+						</>
 					) : (
 						<p className="text-muted mb-0">
 							No skills identified. Upload your resume first, then press
@@ -410,7 +580,13 @@ const ResumeSkills = ({ refreshKey }) => {
 			</div>
 
 			{uid && (
-				<TargetJobPicker uid={uid} skills={skills} skillsLoading={loading} />
+				<TargetJobPicker
+					uid={uid}
+					skills={skills}
+					skillsLoading={loading}
+					levelsChanged={levelsChanged}
+					onAnalyzed={() => setLevelsChanged(false)}
+				/>
 			)}
 		</div>
 	);

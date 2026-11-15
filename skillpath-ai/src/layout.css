@@ -1,0 +1,40 @@
+/*
+ * App-wide layout. Imported in App.jsx after App.css so it wins.
+ *
+ * The Vite starter's index.css / App.css centre the app and limit its width:
+ *   body  { display: flex; place-items: center; min-height: 100vh; }
+ *   #root { max-width: 1280px; margin: 0 auto; padding: 2rem; text-align: center; }
+ * These rules undo that so every page uses the full window.
+ */
+html,
+body {
+	margin: 0;
+	padding: 0;
+	width: 100%;
+	min-height: 100%;
+}
+
+body {
+	display: block;
+	place-items: initial;
+	min-width: 0;
+}
+
+#root {
+	max-width: none;
+	width: 100%;
+	margin: 0;
+	padding: 0;
+	text-align: left;
+}
+
+.App {
+	min-height: 100vh;
+}
+
+/* Toolbar stays at the top of the window while the page scrolls. */
+.app-toolbar {
+	position: sticky;
+	top: 0;
+	z-index: 1030;
+}

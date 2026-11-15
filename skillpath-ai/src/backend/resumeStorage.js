@@ -1,4 +1,4 @@
-import { getDatabase, ref as dbRef, remove } from "firebase/database";
+import { ref as dbRef, getDatabase, remove } from "firebase/database";
 import { deleteObject, getStorage, ref as storageRef } from "firebase/storage";
 import "./firebase.jsx"; // makes sure the Firebase app is initialized
 
@@ -24,7 +24,8 @@ export const deleteResumeFile = async (uid) => {
 
 /**
  * Delete the user's current resume, whichever kind it is: the uploaded file,
- * the database key that points to it, and any typed resume text.
+ * the database key that points to it, and any typed resume text. Skill levels
+ * the user set for the old resume are cleared too.
  * Removing a key that doesn't exist is not an error.
  */
 export const deleteCurrentResume = async (uid) => {
@@ -33,5 +34,6 @@ export const deleteCurrentResume = async (uid) => {
 	await Promise.all([
 		remove(dbRef(db, `users/${uid}/${RESUME_PATH_KEY}`)),
 		remove(dbRef(db, `users/${uid}/resumeText`)),
+		remove(dbRef(db, `users/${uid}/skillLevels`)),
 	]);
 };

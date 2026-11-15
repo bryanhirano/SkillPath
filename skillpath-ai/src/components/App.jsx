@@ -2,6 +2,7 @@ import "../App.css";
 import { Navigate, Route, Routes } from "react-router-dom";
 import "bootstrap";
 import "bootstrap/dist/css/bootstrap.css";
+import "../layout.css"; // after App.css and Bootstrap: full-width page, fixed toolbar
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { faBars } from "@fortawesome/free-solid-svg-icons";
 import { onAuthStateChanged } from "firebase/auth";
@@ -82,7 +83,7 @@ function App({ authedUser, loaded, dispatch }) {
 				<Route path="/skills" element={<ResumeSkills />} />
 				<Route path="/dashboard" element={<ResumeDashboard />} />
 				<Route path="/training" element={<Training />} />
-				<Route path="*" element={<Navigate to="/resume" replace />} />
+				<Route path="*" element={<Navigate to="/dashboard" replace />} />
 			</Routes>
 		</div>
 	);

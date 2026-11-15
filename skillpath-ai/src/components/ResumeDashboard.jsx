@@ -1,5 +1,5 @@
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -30,7 +30,12 @@ const DEGREE_ORDER = [
 	"Bachelor's Degree",
 	"Associate Degree",
 ];
-const EMPTY_RESULTS = { text: null, skills: null, analysis: null, target: null };
+const EMPTY_RESULTS = {
+	text: null,
+	skills: null,
+	analysis: null,
+	target: null,
+};
 
 // Saved target job + latest gap analysis (written by the Skills page).
 const loadTargetJob = () =>
@@ -38,7 +43,9 @@ const loadTargetJob = () =>
 		.then(({ data }) => data)
 		.catch((err) => {
 			console.error("list_target_roles failed:", err);
-			throw new Error("Your target job couldn't be loaded. Press Refresh to try again.");
+			throw new Error(
+				"Your target job couldn't be loaded. Press Refresh to try again.",
+			);
 		});
 
 const formatCategory = (category) =>
@@ -73,6 +80,95 @@ const SectionError = ({ message }) => (
 	</div>
 );
 
+/**
+ * Skill name that shows where the skill was found in the resume.
+ * Opens on hover, keyboard focus, or tap (touch screens have no hover).
+ * The popup is position: fixed so the table's scroll container can't clip it.
+ */
+const SkillEvidence = ({ name, evidence }) => {
+	const anchor = useRef(null);
+	const [pos, setPos] = useState(null); // where the popup sits while open
+	const lines = (evidence ?? []).filter(Boolean);
+
+	const open = () => {
+		const rect = anchor.current?.getBoundingClientRect();
+		if (!rect) return;
+		const width = Math.min(360, window.innerWidth - 16);
+		const left = Math.max(
+			8,
+			Math.min(rect.left, window.innerWidth - width - 8),
+		);
+		// Below the name, or above it when there isn't room underneath.
+		const roomBelow = window.innerHeight - rect.bottom > 170;
+		setPos(
+			roomBelow
+				? { left, width, top: rect.bottom + 6 }
+				: { left, width, bottom: window.innerHeight - rect.top + 6 },
+		);
+	};
+	const close = useCallback(() => setPos(null), []);
+
+	// Close when the page scrolls or resizes, since the popup is fixed in place.
+	useEffect(() => {
+		if (!pos) return undefined;
+		window.addEventListener("scroll", close, true);
+		window.addEventListener("resize", close);
+		return () => {
+			window.removeEventListener("scroll", close, true);
+			window.removeEventListener("resize", close);
+		};
+	}, [pos, close]);
+
+	return (
+		<>
+			<button
+				ref={anchor}
+				type="button"
+				className="btn btn-link p-0 text-body text-decoration-none text-start align-baseline"
+				style={{
+					borderBottom: "1px dotted currentColor",
+					borderRadius: 0,
+					cursor: "help",
+				}}
+				aria-expanded={!!pos}
+				onMouseEnter={open}
+				onMouseLeave={close}
+				onFocus={open}
+				onBlur={close}
+				onClick={() => (pos ? close() : open())}
+				onKeyDown={(e) => e.key === "Escape" && close()}
+			>
+				{name}
+			</button>
+			{pos && (
+				<div
+					role="tooltip"
+					className="bg-dark text-white rounded shadow p-2 small"
+					style={{
+						position: "fixed",
+						zIndex: 1080,
+						pointerEvents: "none",
+						...pos,
+					}}
+				>
+					<div className="fw-semibold mb-1">Found in your resume</div>
+					{lines.length > 0 ? (
+						lines.map((line) => (
+							<div key={line} className="mb-1 fst-italic">
+								“{line}”
+							</div>
+						))
+					) : (
+						<div className="fst-italic">
+							No example sentence was saved for this skill.
+						</div>
+					)}
+				</div>
+			)}
+		</>
+	);
+};
+
 const GAP_BADGE = { missing: "bg-danger", partial: "bg-warning text-dark" };
 
 // The job the user is aiming for, chosen on the Skills page.
@@ -102,8 +198,8 @@ const TargetJobCard = ({ target, error }) => {
 					<SectionError message={error} />
 				) : !saved ? (
 					<p className="text-muted mb-0">
-						You haven't chosen a job to aim for yet. Pick one on the Skills
-						page to see how your skills compare.
+						You haven't chosen a job to aim for yet. Pick one on the Skills page
+						to see how your skills compare.
 					</p>
 				) : (
 					<>
@@ -144,9 +240,7 @@ const TargetJobCard = ({ target, error }) => {
 								</div>
 								{gaps.length > 0 ? (
 									<>
-										<div className="small text-muted mb-1">
-											Skills to build
-										</div>
+										<div className="small text-muted mb-1">Skills to build</div>
 										<ul className="list-unstyled mb-0">
 											{gaps.slice(0, 5).map((gap) => (
 												<li
@@ -172,9 +266,6 @@ const TargetJobCard = ({ target, error }) => {
 												+{gaps.length - 5} more on the Skills page
 											</div>
 										)}
-										<Link to="/training" className="btn btn-success btn-sm mt-3">
-											View training plan
-										</Link>
 									</>
 								) : (
 									<p className="mb-0">
@@ -184,8 +275,8 @@ const TargetJobCard = ({ target, error }) => {
 							</>
 						) : (
 							<p className="text-muted mb-0">
-								No comparison yet. Open the Skills page and press "Update
-								target job" to compare your skills with this job.
+								No comparison yet. Open the Skills page and press "Update target
+								job" to compare your skills with this job.
 							</p>
 						)}
 					</>
@@ -246,7 +337,10 @@ const ResumeDashboard = () => {
 			const text = settle(textResult, "Resume text extraction failed.");
 			const skills = settle(skillsResult, "Skill identification failed.");
 			const analysis = settle(analysisResult, "Resume analysis failed.");
-			const target = settle(targetResult, "Your target job couldn't be loaded.");
+			const target = settle(
+				targetResult,
+				"Your target job couldn't be loaded.",
+			);
 
 			setResults({
 				text: text.value,
@@ -416,8 +510,11 @@ const ResumeDashboard = () => {
 											<tbody>
 												{skills.map((skill) => (
 													<tr key={skill.skillId}>
-														<td title={skill.evidence?.join("\n")}>
-															{skill.name}
+														<td>
+															<SkillEvidence
+																name={skill.name}
+																evidence={skill.evidence}
+															/>
 														</td>
 														<td className="text-muted">
 															{formatCategory(skill.category)}
@@ -453,7 +550,8 @@ const ResumeDashboard = () => {
 									</div>
 									<p className="text-muted small mt-3 mb-0">
 										Levels are estimated from how each skill is described in
-										your resume. Hover over a skill to see where it was found.
+										your resume. Hover over or tap a skill to see where it was
+										found.
 									</p>
 								</>
 							)}

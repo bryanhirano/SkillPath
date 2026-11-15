@@ -1,3 +1,5 @@
+"""Tests for target-role selection and job-description analysis."""
+
 import unittest
 
 from skillpath.catalog import Catalog, Requirement, Role, Skill, validate_catalog
@@ -6,6 +8,7 @@ from skillpath.targets import role_options, select_target
 
 
 def make_catalog() -> Catalog:
+    """Build a small validated catalog for target-selection tests."""
     def skill(sid, name, cat, aliases=(), prereqs=()):
         return Skill(sid, name, cat, tuple(aliases), tuple(prereqs), 15)
 
@@ -33,22 +36,28 @@ JD = ("We need a data analyst. Required: strong SQL and PostgreSQL experience. "
 
 
 class TargetTests(unittest.TestCase):
+    """Test role and custom job-description target selection."""
+
     def setUp(self):
+        """Create a fresh catalog for each test."""
         self.catalog = make_catalog()
 
     def test_role_options_sorted_with_onet(self):
+        """Return catalog roles sorted with O*NET metadata."""
         opts = role_options(self.catalog)
         self.assertEqual([o["title"] for o in opts], ["Data Scientist", "Web Developer"])
         self.assertEqual(opts[0]["onetCode"], "15-2051.00")
         self.assertEqual(opts[0]["requirementCount"], 3)
 
     def test_role_without_skills_saves_but_no_analysis(self):
+        """Save a catalog role without analyzing absent skills."""
         out = select_target({"target": {"roleId": "data-sci"}}, self.catalog)
         self.assertIsNone(out["analysis"])
         self.assertEqual(out["target"],
                          {"roleId": "data-sci", "resolvedTitle": "Data Scientist", "custom": False})
 
     def test_role_with_skills_runs_analysis(self):
+        """Analyze a catalog role when the user has supplied skills."""
         out = select_target(
             {"target": {"roleId": "data-sci"}, "skills": [{"skillId": "python", "level": 3}]},
             self.catalog,
@@ -60,15 +69,18 @@ class TargetTests(unittest.TestCase):
         self.assertTrue(a["pathway"]["steps"])
 
     def test_unknown_role_rejected(self):
+        """Reject a role identifier absent from the catalog."""
         with self.assertRaises(InputError):
             select_target({"target": {"roleId": "astronaut"}}, self.catalog)
 
     def test_missing_target_rejected(self):
+        """Reject requests without a usable target."""
         for bad in ({}, {"target": None}, {"target": {"jobDescription": "  "}}, "x"):
             with self.assertRaises(InputError):
                 select_target(bad if isinstance(bad, dict) else bad, self.catalog)
 
     def test_job_description_target(self):
+        """Build a custom target from a job description and supplied skills."""
         calls = []
         out = select_target(
             {"target": {"title": " Data Analyst ", "jobDescription": JD},
@@ -83,6 +95,7 @@ class TargetTests(unittest.TestCase):
         self.assertTrue({"sql", "stats"} <= req_ids)
 
     def test_role_does_not_load_tagger(self):
+        """Avoid loading the tagger when selecting a catalog role."""
         def boom():
             raise AssertionError("tagger should not load for catalog roles")
         select_target({"target": {"roleId": "web-dev"}}, self.catalog, tagger_factory=boom)

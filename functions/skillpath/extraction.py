@@ -78,6 +78,7 @@ class ExtractedSkill:  # pylint: disable=too-many-instance-attributes
     sources: list[str]
     mentions: int
     evidence: list[str] = field(default_factory=list)
+    level_reasons: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Return the skill in the callable API representation."""
@@ -90,6 +91,7 @@ class ExtractedSkill:  # pylint: disable=too-many-instance-attributes
             "sources": self.sources,
             "mentions": self.mentions,
             "evidence": self.evidence,
+            "levelReasons": self.level_reasons,
         }
 
 
@@ -351,33 +353,120 @@ def find_mentions(
     return mentions, unmapped
 
 
-def estimate_level(mentions: list[tuple[str, str]]) -> int:
-    """Heuristic 1-5 proficiency estimate from (sentence, matched text) pairs.
+LEVEL_NAMES = {1: "Awareness", 2: "Beginner", 3: "Intermediate", 4: "Advanced", 5: "Expert"}
 
-    Years of experience only count when stated close to the skill ("4 years of
-    SQL", "Python (6 yrs)"), not for a sentence's overall experience. Users
-    confirm or correct every estimate in the review step, so this only has to be
-    a sensible starting point.
+
+def _lvl(level: int) -> str:
+    return f"{LEVEL_NAMES[level]} ({level})"
+
+
+def _nearby_years(mentions: list[tuple[str, str]]) -> list[tuple[int, str]]:
+    """Find experience durations stated close to each mentioned skill."""
+    years = []
+    for sentence, text in mentions:
+        pos = sentence.lower().find(text.lower())
+        for match in YEARS.finditer(sentence):
+            near_start = abs(match.end() - pos) <= YEARS_WINDOW
+            near_end = abs(match.start() - (pos + len(text))) <= YEARS_WINDOW
+            if pos >= 0 and (near_start or near_end):
+                years.append((int(match.group(1)), match.group(0).strip()))
+    return years
+
+
+def _apply_year_adjustment(
+    level: int, years: list[tuple[int, str]], reasons: list[str]
+) -> int:
+    """Apply the proficiency floor implied by the strongest nearby duration."""
+    if not years:
+        return level
+
+    years_count, phrase = max(years)
+    floor = 2 if years_count < 1 else 3 if years_count <= 2 else 4 if years_count <= 5 else 5
+    if floor > level:
+        reasons.append(f"\u201c{phrase}\u201d stated next to it: raised to {_lvl(floor)}.")
+        return floor
+
+    reasons.append(
+        f"\u201c{phrase}\u201d stated next to it: supports {_lvl(floor)}, "
+        "no change."
+    )
+    return level
+
+
+def _apply_cue_adjustments(level: int, sentences: list[str], reasons: list[str]) -> int:
+    """Adjust proficiency for strong or beginner wording."""
+    strong = next((m.group(0) for s in sentences if (m := STRONG_CUES.search(s))), None)
+    if strong:
+        new_level = min(5, level + 1)
+        reasons.append(
+            f"Strong wording (\u201c{strong}\u201d): +1 to {_lvl(new_level)}."
+            if new_level > level
+            else f"Strong wording (\u201c{strong}\u201d): already at the maximum."
+        )
+        level = new_level
+
+    if sentences and all(WEAK_CUES.search(s) for s in sentences):
+        weak = WEAK_CUES.search(sentences[0]).group(0)
+        if level > 2:
+            reasons.append(
+                f"Only described with beginner wording (\u201c{weak}\u201d): "
+                f"capped at {_lvl(2)}."
+            )
+        else:
+            reasons.append(f"Beginner wording (\u201c{weak}\u201d) keeps it at {_lvl(level)}.")
+        level = min(level, 2)
+
+    return level
+
+
+def explain_level(mentions: list[tuple[str, str]]) -> tuple[int, list[str]]:
+    """Heuristic 1-5 proficiency estimate, plus one plain sentence per rule applied.
+
+    ``mentions`` are (sentence, matched text) pairs. Years of experience only
+    count when stated close to the skill ("4 years of SQL", "Python (6 yrs)"),
+    not for a sentence's overall experience. The reasons are shown to users so
+    they can judge the estimate and correct it.
     """
     unique = list(dict.fromkeys(mentions))
     sentences = list(dict.fromkeys(s for s, _ in unique))
-    level = 3 if len(sentences) >= 3 else 2
-    years = []
-    for sentence, text in unique:
-        pos = sentence.lower().find(text.lower())
-        for m in YEARS.finditer(sentence):
-            near_start = abs(m.end() - pos) <= YEARS_WINDOW
-            near_end = abs(m.start() - (pos + len(text))) <= YEARS_WINDOW
-            if pos >= 0 and (near_start or near_end):
-                years.append(int(m.group(1)))
-    if years:
-        y = max(years)
-        level = max(level, 2 if y < 1 else 3 if y <= 2 else 4 if y <= 5 else 5)
-    if any(STRONG_CUES.search(s) for s in sentences):
-        level = min(5, level + 1)
-    if sentences and all(WEAK_CUES.search(s) for s in sentences):
-        level = min(level, 2)
-    return max(1, min(5, level))
+    n = len(sentences)
+    level = 3 if n >= 3 else 2
+    reasons = [
+        f"Mentioned in {n} sentence{'s' if n != 1 else ''}, so it starts at {_lvl(level)}."
+        + ("" if n >= 3 else f" 3 or more mentions would start at {_lvl(3)}.")
+    ]
+
+    years = _nearby_years(unique)
+    level = _apply_year_adjustment(level, years, reasons)
+    level = _apply_cue_adjustments(level, sentences, reasons)
+
+    return max(1, min(5, level)), reasons
+
+
+def estimate_level(mentions: list[tuple[str, str]]) -> int:
+    """Heuristic 1-5 proficiency estimate from (sentence, matched text) pairs."""
+    return explain_level(mentions)[0]
+
+
+def apply_level_overrides(skills: list[dict], overrides) -> list[dict]:
+    """Apply levels the user set themselves on top of the estimated ones.
+
+    ``skills`` are ``ExtractedSkill.to_dict()`` rows; ``overrides`` maps
+    skillId -> level (0-5) as stored for the user. Every row gets
+    ``estimatedLevel`` (the heuristic's value) and ``userSet``. Overrides for
+    skills not found in the resume, or with invalid values, are ignored.
+    """
+    overrides = overrides if isinstance(overrides, dict) else {}
+    out = []
+    for row in skills:
+        row = {**row, "estimatedLevel": row["level"], "userSet": False}
+        value = overrides.get(row["skillId"])
+        if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 5:
+            row["level"] = value
+            row["userSet"] = True
+        out.append(row)
+    out.sort(key=lambda r: (-r["level"], -r.get("confidence", 0), r["name"]))
+    return out
 
 
 def _snippet(sentence: str, needle: str, width: int = 140) -> str:
@@ -405,6 +494,7 @@ def extract_skills(text: str, catalog: Catalog, tagger: SpanTagger | None = None
         pairs = [(m.sentence, m.text) for m in ms]
         evidence = list(dict.fromkeys(_snippet(m.sentence, m.text) for m in ms))[:2]
         sources = sorted({m.source for m in ms})
+        level, reasons = explain_level(pairs)
         confidence = max(m.confidence for m in ms)
         if len(sources) > 1:
             confidence = min(0.99, confidence + 0.05)  # both extractors agree
@@ -413,11 +503,12 @@ def extract_skills(text: str, catalog: Catalog, tagger: SpanTagger | None = None
                 skill_id=sid,
                 name=skill.name,
                 category=skill.category,
-                level=estimate_level(pairs),
+                level=level,
                 confidence=confidence,
                 sources=sources,
                 mentions=len(set(sents)),
                 evidence=evidence,
+                level_reasons=reasons,
             )
         )
     skills.sort(key=lambda s: (-s.level, -s.confidence, s.name))

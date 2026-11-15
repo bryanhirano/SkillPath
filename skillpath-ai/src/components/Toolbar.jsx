@@ -4,15 +4,13 @@ import { _signOut, userHasResumeUploaded } from "../backend/firebase"; // Adjust
 
 // Pages in the order a user works through them.
 
-
-
-
 const Toolbar = () => {
+	const [pages, setPages] = useState([]);
+
 	const navigate = useNavigate();
 	// The menu is collapsed into a button on small screens.
 	const [open, setOpen] = useState(false);
 	const close = () => setOpen(false);
-	const [pages,setPages] = useState([])
 
 	const handleSignOut = () => {
 		close();
@@ -21,26 +19,26 @@ const Toolbar = () => {
 		});
 	};
 
-useEffect(() => {
-	async function checkResume() {
-		var hasResume = await userHasResumeUploaded();
-		console.log(hasResume +"hasResume");
-		hasResume? setPages([
-		{ to: "/resume", label: "My Resume" },
-		{ to: "/dashboard", label: "Dashboard" },
-		{ to: "/skills", label: "Skills & Target Job" },
-		{ to: "/training", label: "Training Plan" },
-	]): setPages([{ to: "/resume", label: "My Resume" },]);
-	}
-	checkResume();
-	console.log(pages[0] + "pages");
-	
-	},);
+	useEffect(() => {
+		async function checkResume() {
+			var hasResume = await userHasResumeUploaded();
+			console.log(`${hasResume}hasResume`);
+			hasResume
+				? setPages([
+						{ to: "/resume", label: "My Resume" },
+						{ to: "/dashboard", label: "Dashboard" },
+						{ to: "/skills", label: "Skills & Target Job" },
+						{ to: "/training", label: "Training Plan" },
+					])
+				: setPages([{ to: "/resume", label: "My Resume" }]);
+		}
+		checkResume();
+		console.log(`${pages[0]}pages`);
+	});
 
-	
-
+	// app-toolbar (layout.css) keeps the bar at the top while the page scrolls.
 	return (
-		<nav className="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm mb-4">
+		<nav className="app-toolbar navbar navbar-expand-lg navbar-dark bg-primary shadow-sm mb-4">
 			<div className="container-fluid">
 				{/* Brand Logo / Home Link */}
 				<Link className="navbar-brand fw-bold" to="/dashboard" onClick={close}>
