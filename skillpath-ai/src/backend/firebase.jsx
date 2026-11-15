@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import {
 	browserSessionPersistence,
+	connectAuthEmulator,
 	createUserWithEmailAndPassword,
 	deleteUser,
 	GoogleAuthProvider,
@@ -13,9 +14,10 @@ import {
 	signOut,
 	updateProfile,
 } from "firebase/auth";
-import { child, get, getDatabase, ref, update } from "firebase/database";
-import { getFunctions, httpsCallable } from "firebase/functions";
+import { child, connectDatabaseEmulator, get, getDatabase, ref, update } from "firebase/database";
+import { connectFunctionsEmulator, getFunctions, httpsCallable } from "firebase/functions";
 import {
+	connectStorageEmulator,
 	deleteObject,
 	getStorage,
 	ref as storageRefs,
@@ -35,10 +37,18 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const data = getDatabase(app);
-const dbRef = ref(data);
 const storage = getStorage(app);
-export const auth = getAuth();
+export const auth = getAuth(app);
 const functions = getFunctions(app, "us-central1");
+
+// Use local services during development, never production services by accident.
+if (import.meta.env.DEV && import.meta.env.VITE_USE_FIREBASE_EMULATORS === "true") {
+	connectAuthEmulator(auth, "http://127.0.0.1:9099");
+	connectDatabaseEmulator(data, "127.0.0.1", 9000);
+	connectStorageEmulator(storage, "127.0.0.1", 9199);
+	connectFunctionsEmulator(functions, "127.0.0.1", 5001);
+}
+const dbRef = ref(data);
 
 const persistenceReady = setPersistence(auth, browserSessionPersistence).catch(
 	(error) => console.error("Could not set auth persistence:", error),
@@ -197,7 +207,7 @@ export async function uploadResume(uid, file) {
 		throw new Error("Resume must be smaller than 5 MB.");
 	}
 
-	const filePath = `resume/${uid}/`;
+	const filePath = `resume/${uid}`;
 	const storageRef = storageRefs(storage, filePath);
 	const metadata = {
 		contentType,
@@ -214,6 +224,8 @@ export async function uploadResume(uid, file) {
 			[`users/${uid}/resumeContentType`]: contentType,
 			// The newest resume wins: drop any typed resume so the functions read this file.
 			[`users/${uid}/resumeText`]: null,
+			[`users/${uid}/resumeRevision`]: crypto.randomUUID(),
+			[`users/${uid}/resumeAnalysis`]: null,
 		});
 	} catch (error) {
 		await deleteObject(snapshot.ref).catch((cleanupError) => {
@@ -266,6 +278,8 @@ export function saveResumeText(uid, text) {
 
 	const updates = {};
 	updates[`users/${uid}/resumeText`] = text;
+	updates[`users/${uid}/resumeRevision`] = crypto.randomUUID();
+	updates[`users/${uid}/resumeAnalysis`] = null;
 
 	return update(ref(data), updates);
 }
@@ -289,7 +303,7 @@ export async function identifyResumeSkills() {
 	}
 
 	await user.getIdToken();
-	const callable = httpsCallable(functions, "identify_resume_skills");
+	const callable = httpsCallable(functions, "identify_resume_skills", {timeout: 300000});
 	const result = await callable({});
 	return result.data;
 }
@@ -336,6 +350,7 @@ export async function userHasResumeUploaded() {
 	await user.getIdToken();
 
 	try {
+
 		const [pathSnapshot, textSnapshot] = await Promise.all([
 			get(child(dbRef, `users/${user.uid}/resumePath`)),
 			get(child(dbRef, `users/${user.uid}/resumeText`)),

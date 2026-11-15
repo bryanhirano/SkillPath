@@ -22,8 +22,7 @@
 				},
 				"resumePath": {
 					".write": "auth != null && auth.uid === $uid",
-					".validate": "newData.isString() && newData.val().beginsWith('resumes/' + $uid + '/') && newData.val().length <= 512"
-				},
+					".validate": "newData.isString() && newData.val() === 'resume/' + $uid"				},
 				"resumeFileName": {
 					".write": "auth != null && auth.uid === $uid",
 					".validate": "newData.isString() && newData.val().length <= 255"
@@ -38,6 +37,22 @@
 				},
 				"$other": {
 					".write": false
+				},
+				"name": {
+					".write": "auth != null && auth.uid === $uid",
+					".validate": "newData.isString() && newData.val().length <= 200"
+				},
+				"email": {
+					".write": "auth != null && auth.uid === $uid",
+					".validate": "newData.isString() && newData.val().length <= 254"
+				},
+				"color": {
+					".write": "auth != null && auth.uid === $uid",
+					".validate": "newData.isString() && newData.val().length <= 50"
+				},
+				"phone": {
+					".write": "auth != null && auth.uid === $uid",
+					".validate": "newData.isString() && newData.val().length <= 30"
 				}
 			}
 		}

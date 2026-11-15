@@ -1,17 +1,26 @@
+
 rules_version = '2';
+
 service firebase.storage {
   match /b/{bucket}/o {
-    // Resumes are private to their owner. The client can upload and delete,
-    // never read back: only the Cloud Function (admin SDK) reads them.
-    match /resumes/{uid}/{fileName} {
+
+    // Each authenticated user can upload and delete their own resume.
+    // The Cloud Function reads the file using the Admin SDK.
+    match /resume/{uid} {
       allow create: if request.auth != null
                     && request.auth.uid == uid
                     && request.resource.size < 5 * 1024 * 1024
                     && request.resource.contentType.matches(
-                         'application/pdf|text/plain|application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-      allow delete: if request.auth != null && request.auth.uid == uid;
+                      'application/pdf|text/plain|application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                    );
+
+      allow delete: if request.auth != null
+                    && request.auth.uid == uid;
+
       allow read, update: if false;
     }
+
+    // Deny access to everything else.
     match /{allPaths=**} {
       allow read, write: if false;
     }
