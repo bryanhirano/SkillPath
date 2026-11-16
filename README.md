@@ -1,8 +1,11 @@
 # SkillPath
 SkillPath is a career-development web application that enables users to assess their current skills, explore occupations, identify potential skill gaps, and plan learning pathways to achieve career objectives.
 
-The project integrates a React frontend with Firebase-supported user data management and resume processing. Occupational information from O\*NET and machine learning integrations using Hugging Face are included in the intended documentation scope. However, the specific integrations and models require verification against the application source prior to being documented as implemented features.
-Project documentation status: This README is based on the provided root configuration files and the existing README. The src/ and functions/ directories were not available for review. Consequently, certain application workflows and external model integrations described below are presented as intended or pending verification, rather than as confirmed operational features.
+The app integrates a React frontend with Firebase-supported user data management to allow users to login to the app and upload their resume. The app transforms the resume into text and uses machine learning models from Hugging Face to extract the user's knowledge ([jjzha
+/jobbert_knowledge_extraction] (https://huggingface.co/jjzha/jobbert_knowledge_extraction)) and skills ([jjzha
+/jobbert_skill_extraction] (https://huggingface.co/jjzha/jobbert_skill_extraction)).
+
+Users are able to upload their resume in DOCX or PDF formatOccupational information from O\*NET and machine learning integrations using Hugging Face are included in the intended documentation scope. 
 
 ## Contents
 
@@ -201,27 +204,6 @@ This application incorporates information from ONET Web Services by the U.S. Dep
 
 Action required: Review the source code to determine the appropriate attribution, identify the specific O\*NET database version if downloads are used, and ensure attribution is displayed wherever required within the application. README attribution alone does not fulfill all obligations.
 
-## Hugging Face models and licenses
-
-Hugging Face hosts models and inference tools; however, there is no universal “Hugging Face model license.” Each model repository may have its own license, acceptable-use conditions, gated-access restrictions, and attribution requirements.
-
-The specific Hugging Face integration cannot be determined from the provided root files. Before finalizing the AI section, include the actual models and their verified roles:
-
-| Model repository ID | SkillPath task | Integration route | License | Status |
-| --- | --- | --- | --- | --- |
-| TODO: organization/model-name | TODO: e.g., embeddings, classification, or text generation | TODO: API / hosted endpoint / local inference | TODO: as listed on model card | Not verified |
-
-For each model, document:
-
-1. The exact organization/model-name and link to its Hugging Face model card.
-2. What input SkillPath sends to the model and what output it uses.
-3. Whether inference happens locally, in Firebase Functions, or through a hosted service.
-4. The model’s license and any required attribution or use restrictions.
-5. Any privacy implications of sending resumes or other user information to an external service.
-6. How the feature behaves if model inference is unavailable or fails.
-
-Do not describe the current keyword-based analyze_resume function as “AI-powered” unless a verified model integration is responsible for its operation.
-
 ## Getting started
 
 ### Prerequisites
@@ -331,9 +313,7 @@ The following items need source review before this documentation can be consider
 
 ## Licensing and acknowledgments
 
-SkillPath source code: A project-level license has not been provided. Do not assume this repository is MIT-licensed or open source because its dependencies are open source. If the team intends to license its own code, add an appropriate LICENSE file after agreeing on the terms.
-
-ONET occupational information: ©/attribution and reuse obligations depend on the ONET content source. See the O\*NET licensing overview, Database license, and Web Services developer guidance.
+This project includes information from [O*NET Web Services] (https://services.onetcenter.org/) by the U.S. Department of Labor, Employment and Training Administration (USDOL/ETA). Used under the [CC BY 4.0] (https://creativecommons.org/licenses/by/4.0/) license. O*NET® is a trademark of USDOL/ETA. This project has modified all or some of this information. USDOL/ETA has not approved, endorsed, or tested these modifications.
 
 Hugging Face: Model licenses belong to their individual publishers or authors, as identified on each repository’s model card. Hugging Face itself is not a substitute for model-specific license review.
 
