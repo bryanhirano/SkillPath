@@ -1,11 +1,9 @@
 # SkillPath
 SkillPath is a career-development web application that enables users to assess their current skills, explore occupations, identify potential skill gaps, and plan learning pathways to achieve career objectives.
 
-The app integrates a React frontend with Firebase-supported user data management to allow users to login to the app and upload their resume. The app transforms the resume into text and uses machine learning models from Hugging Face to extract the user's knowledge ([jjzha
-/jobbert_knowledge_extraction] (https://huggingface.co/jjzha/jobbert_knowledge_extraction)) and skills ([jjzha
-/jobbert_skill_extraction] (https://huggingface.co/jjzha/jobbert_skill_extraction)).
-
-Users are able to upload their resume in DOCX or PDF formatOccupational information from O\*NET and machine learning integrations using Hugging Face are included in the intended documentation scope. 
+The app integrates a React frontend with Firebase-supported user data management to allow users to login to the app and upload their resume in DOCX or PDF. The app transforms the resume into text and uses machine learning models from Hugging Face to extract the user's knowledge ([jjzha
+/jobbert_knowledge_extraction](https://huggingface.co/jjzha/jobbert_knowledge_extraction)) and skills ([jjzha
+/jobbert_skill_extraction](https://huggingface.co/jjzha/jobbert_skill_extraction)). Occupational information from O\*NET is used to perform a gap analysis of a user's assessed knowledge and skills vs the target role's required knowledge and skills.
 
 ## Contents
 
@@ -313,7 +311,7 @@ The following items need source review before this documentation can be consider
 
 ## Licensing and acknowledgments
 
-This project includes information from [O*NET Web Services] (https://services.onetcenter.org/) by the U.S. Department of Labor, Employment and Training Administration (USDOL/ETA). Used under the [CC BY 4.0] (https://creativecommons.org/licenses/by/4.0/) license. O*NET® is a trademark of USDOL/ETA. This project has modified all or some of this information. USDOL/ETA has not approved, endorsed, or tested these modifications.
+This project includes information from [O*NET Web Services](https://services.onetcenter.org/) by the U.S. Department of Labor, Employment and Training Administration (USDOL/ETA). Used under the [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) license. O*NET® is a trademark of USDOL/ETA. This project has modified all or some of this information. USDOL/ETA has not approved, endorsed, or tested these modifications.
 
 Hugging Face: Model licenses belong to their individual publishers or authors, as identified on each repository’s model card. Hugging Face itself is not a substitute for model-specific license review.
 
