@@ -2,6 +2,8 @@
 
 SkillPath is a career-development web application that enables users to assess their current skills, explore occupations, identify potential skill gaps, and plan learning pathways to achieve career objectives.
 
+[Access the Website](https://mynotes-ae8c6.firebaseapp.com/login)
+
 ## Contents
 
 - [Overview](#overview)
