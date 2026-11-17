@@ -24,7 +24,11 @@ import {
 	ref,
 	update,
 } from "firebase/database";
-import { connectFunctionsEmulator, getFunctions, httpsCallable } from "firebase/functions";
+import {
+	connectFunctionsEmulator,
+	getFunctions,
+	httpsCallable,
+} from "firebase/functions";
 import {
 	connectStorageEmulator,
 	deleteObject,
@@ -51,7 +55,10 @@ export const auth = getAuth(app);
 const functions = getFunctions(app, "us-central1");
 
 // Use local services during development, never production services by accident.
-if (import.meta.env.DEV && import.meta.env.VITE_USE_FIREBASE_EMULATORS === "true") {
+if (
+	import.meta.env.DEV &&
+	import.meta.env.VITE_USE_FIREBASE_EMULATORS === "true"
+) {
 	connectAuthEmulator(auth, "http://127.0.0.1:9099");
 	connectDatabaseEmulator(data, "127.0.0.1", 9000);
 	connectStorageEmulator(storage, "127.0.0.1", 9199);
@@ -259,15 +266,12 @@ export const _deleteUser = () => {
 
 			update(ref(data), updates);
 
-			deleteObject(uidImg).catch((error) => {
-				
-			});
+			deleteObject(uidImg);
 
 			alert("Your account has been deleted");
 		})
-		.catch((error) => {
+		.catch(() => {
 			alert("Please log out, log in, and try again");
-			
 		});
 };
 
@@ -311,7 +315,9 @@ export async function identifyResumeSkills() {
 	}
 
 	await user.getIdToken();
-	const callable = httpsCallable(functions, "identify_resume_skills", {timeout: 300000});
+	const callable = httpsCallable(functions, "identify_resume_skills", {
+		timeout: 300000,
+	});
 	const result = await callable({});
 	return result.data;
 }
@@ -358,7 +364,6 @@ export async function userHasResumeUploaded() {
 	await user.getIdToken();
 
 	try {
-
 		const [pathSnapshot, textSnapshot] = await Promise.all([
 			get(child(dbRef, `users/${user.uid}/resumePath`)),
 			get(child(dbRef, `users/${user.uid}/resumeText`)),

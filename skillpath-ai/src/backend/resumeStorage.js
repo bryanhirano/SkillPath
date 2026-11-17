@@ -1,4 +1,4 @@
-import { getDatabase, ref as dbRef, update } from "firebase/database";
+import { ref as dbRef, getDatabase, update } from "firebase/database";
 import { deleteObject, getStorage, ref as storageRef } from "firebase/storage";
 import "./firebase.jsx"; // makes sure the Firebase app is initialized
 

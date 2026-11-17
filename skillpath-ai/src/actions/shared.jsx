@@ -12,14 +12,11 @@ export function handleInitialData(uid) {
 		// or someone else has logged in.
 		const stillLoggedIn = () => getState().authedUser === uid;
 
-		const profile = getInfo(uid)
-			.then((user) => {
-				if (stillLoggedIn()) dispatch(receiveUser(user));
-			})
-			
-		const appData = Promise.resolve()
-			.then(() => getInitialData(uid))
-			
+		const profile = getInfo(uid).then((user) => {
+			if (stillLoggedIn()) dispatch(receiveUser(user));
+		});
+
+		const appData = Promise.resolve().then(() => getInitialData(uid));
 
 		return Promise.all([profile, appData]).then(() => {
 			if (stillLoggedIn()) {

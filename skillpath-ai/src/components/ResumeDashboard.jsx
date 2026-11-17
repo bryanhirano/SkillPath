@@ -1,5 +1,5 @@
-import { getDatabase, onValue, ref as dbRef } from "firebase/database";
-import { useEffect, useRef, useState } from "react";
+import { ref as dbRef, getDatabase, onValue } from "firebase/database";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import { Link, useNavigate } from "react-router-dom";
 import { getSavedResumeDashboard } from "../backend/resumeDashboard.js";
@@ -20,28 +20,17 @@ const LEVEL_LABELS = [
 	"Advanced",
 	"Expert",
 ];
-const DEGREE_ORDER = [
-	"Doctorate",
-	"Master's Degree",
-	"Bachelor's Degree",
-	"Associate Degree",
-];
-const EMPTY_RESULTS = { text: null, skills: null, analysis: null, unmapped: [], model: null };
+
+const EMPTY_RESULTS = {
+	text: null,
+	skills: null,
+	analysis: null,
+	unmapped: [],
+	model: null,
+};
 
 const formatCategory = (category) =>
 	category ? category.charAt(0).toUpperCase() + category.slice(1) : "Other";
-
-const StatCard = ({ label, value, hint }) => (
-	<div className="col-6 col-lg-3">
-		<div className="card h-100 shadow-sm text-center">
-			<div className="card-body">
-				<div className="text-muted small">{label}</div>
-				<div className="fs-4 fw-semibold">{value}</div>
-				{hint && <div className="text-muted small">{hint}</div>}
-			</div>
-		</div>
-	</div>
-);
 
 const SectionError = ({ message }) => (
 	<div className="alert alert-danger py-2 mb-0" role="alert">
@@ -63,7 +52,10 @@ const SkillEvidence = ({ name, evidence }) => {
 		const rect = anchor.current?.getBoundingClientRect();
 		if (!rect) return;
 		const width = Math.min(360, window.innerWidth - 16);
-		const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+		const left = Math.max(
+			8,
+			Math.min(rect.left, window.innerWidth - width - 8),
+		);
 		// Below the name, or above it when there isn't room underneath.
 		const roomBelow = window.innerHeight - rect.bottom > 170;
 		setPos(
@@ -72,7 +64,7 @@ const SkillEvidence = ({ name, evidence }) => {
 				: { left, width, bottom: window.innerHeight - rect.top + 6 },
 		);
 	};
-	const close = () => setPos(null);
+	const close = useCallback(() => setPos(null), []);
 
 	// Close when the page scrolls or resizes, since the popup is fixed in place.
 	useEffect(() => {
@@ -83,7 +75,7 @@ const SkillEvidence = ({ name, evidence }) => {
 			window.removeEventListener("scroll", close, true);
 			window.removeEventListener("resize", close);
 		};
-	}, [pos]);
+	}, [pos, close]);
 
 	return (
 		<>
@@ -110,7 +102,12 @@ const SkillEvidence = ({ name, evidence }) => {
 				<div
 					role="tooltip"
 					className="bg-dark text-white rounded shadow p-2 small"
-					style={{ position: "fixed", zIndex: 1080, pointerEvents: "none", ...pos }}
+					style={{
+						position: "fixed",
+						zIndex: 1080,
+						pointerEvents: "none",
+						...pos,
+					}}
 				>
 					<div className="fw-semibold mb-1">Found in your resume</div>
 					{lines.length > 0 ? (
@@ -159,8 +156,8 @@ const TargetJobCard = ({ target, error }) => {
 					<SectionError message={error} />
 				) : !saved ? (
 					<p className="text-muted mb-0">
-						You haven't chosen a job to aim for yet. Pick one on the Skills
-						page to see how your skills compare.
+						You haven't chosen a job to aim for yet. Pick one on the Skills page
+						to see how your skills compare.
 					</p>
 				) : (
 					<>
@@ -201,9 +198,7 @@ const TargetJobCard = ({ target, error }) => {
 								</div>
 								{gaps.length > 0 ? (
 									<>
-										<div className="small text-muted mb-1">
-											Skills to build
-										</div>
+										<div className="small text-muted mb-1">Skills to build</div>
 										<ul className="list-unstyled mb-0">
 											{gaps.slice(0, 5).map((gap) => (
 												<li
@@ -238,8 +233,8 @@ const TargetJobCard = ({ target, error }) => {
 							</>
 						) : (
 							<p className="text-muted mb-0">
-								No comparison yet. Open the Skills page and press "Update
-								target job" to compare your skills with this job.
+								No comparison yet. Open the Skills page and press "Update target
+								job" to compare your skills with this job.
 							</p>
 						)}
 					</>
@@ -297,15 +292,19 @@ const ResumeDashboard = () => {
 				offAnalysis();
 				setTargetError("");
 				if (!profile.latestAnalysisId) {
-					setTarget({ savedTarget: profile.target ?? null, latestAnalysis: null });
+					setTarget({
+						savedTarget: profile.target ?? null,
+						latestAnalysis: null,
+					});
 					return;
 				}
 				offAnalysis = onValue(
 					dbRef(database, `users/${uid}/analyses/${profile.latestAnalysisId}`),
-					(latest) => setTarget({
-						savedTarget: profile.target ?? null,
-						latestAnalysis: latest.val(),
-					}),
+					(latest) =>
+						setTarget({
+							savedTarget: profile.target ?? null,
+							latestAnalysis: latest.val(),
+						}),
 					(error) => setTargetError(error.message),
 				);
 			},
@@ -317,7 +316,6 @@ const ResumeDashboard = () => {
 		};
 	}, [uid]);
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: reloadCount intentionally triggers a reload.
 	useEffect(() => {
 		if (!uid) {
 			setResults(EMPTY_RESULTS);
@@ -373,8 +371,6 @@ const ResumeDashboard = () => {
 
 	const { text, skills, analysis } = results;
 	const nothingLoaded = !text && !skills && !analysis;
-	const advancedCount = skills?.filter((s) => s.level >= 4).length ?? 0;
-
 
 	return (
 		<div className="container mt-4 mb-5">
@@ -409,7 +405,9 @@ const ResumeDashboard = () => {
 			</div>
 
 			{resultSource === "saved" && (
-				<p className="text-muted small">Loaded saved analysis from Realtime Database.</p>
+				<p className="text-muted small">
+					Loaded saved analysis from Realtime Database.
+				</p>
 			)}
 
 			{confirmingDelete && (
@@ -460,9 +458,6 @@ const ResumeDashboard = () => {
 				</>
 			) : (
 				<>
-			
-					
-
 					<TargetJobCard target={target} error={targetError} />
 
 					{/* Skills */}
@@ -527,14 +522,13 @@ const ResumeDashboard = () => {
 									</div>
 									<p className="text-muted small mt-3 mb-0">
 										Levels are estimated from how each skill is described in
-										your resume. Hover over or tap a skill to see where it was found.
+										your resume. Hover over or tap a skill to see where it was
+										found.
 									</p>
 								</>
 							)}
 						</div>
 					</div>
-
-				
 
 					{/* Extracted text */}
 					<div className="card shadow-sm">
