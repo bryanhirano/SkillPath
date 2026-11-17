@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Protocol
 
+
 from .catalog import Catalog, normalize_text
 
 log = logging.getLogger(__name__)
@@ -130,32 +131,83 @@ class BertSpanTagger:  # pylint: disable=too-few-public-methods
         return results
 
 
-def decode_bio(sentence: str, tokens: list[dict]) -> list[tuple[str, float]]:
-    """Merge per-token B/I predictions into character spans.
 
-    Works with plain "B"/"I" labels (JobBERT) and "B-SKILL"/"I-SKILL" style labels.
-    Subword pieces ("##ing") always extend the current span.
-    """
-    spans: list[tuple[int, int, list[float]]] = []
-    for tok in tokens:
-        label = str(tok.get("entity", "O")).split("-", maxsplit=1)[0].upper()
-        if label not in ("B", "I"):
-            continue
-        start, end = tok.get("start"), tok.get("end")
+
+def decode_bio(sentence: str, tokens: list[dict]) -> list[tuple[str, float]]:
+    """Combine BERT token predictions into complete skill phrases."""
+    results = []
+    current_start = None
+    current_end = None
+    current_scores = []
+
+    def save_span():
+        if current_start is None or current_end is None:
+            return
+
+        phrase = sentence[current_start:current_end].strip(" ,.;:()")
+        if phrase:
+            confidence = sum(current_scores) / len(current_scores)
+            results.append((phrase, confidence))
+
+    for token in sorted(tokens, key=lambda t: t.get("start") or 0):
+        label = str(token.get("entity", "O")).upper().split("-", 1)[0]
+        start = token.get("start")
+        end = token.get("end")
+
         if start is None or end is None:
             continue
-        is_subword = str(tok.get("word", "")).startswith("##")
-        contiguous = bool(spans) and not sentence[spans[-1][1]:start].strip()
-        if spans and contiguous and (label == "I" or is_subword):
-            s, _, scores = spans[-1]
-            spans[-1] = (s, end, scores + [float(tok.get("score", 0))])
-        else:
-            spans.append((start, end, [float(tok.get("score", 0))]))
-    return [
-        (sentence[s:e].strip(" ,.;:()"), sum(sc) / len(sc))
-        for s, e, sc in spans
-        if sentence[s:e].strip(" ,.;:()")
-    ]
+
+        if not (0 <= start < end <= len(sentence)):
+            continue
+
+        if label not in ("B", "I"):
+            save_span()
+            current_start = None
+            current_end = None
+            current_scores = []
+            continue
+
+        score = float(token.get("score", 0.0))
+
+        if current_start is None:
+            current_start = start
+            current_end = end
+            current_scores = [score]
+            continue
+
+        # Join subword tokens even when BERT incorrectly labels them B.
+        # Examples: S + ##QL = SQL, Re + ##act = React.
+        same_word = (
+            start == current_end
+            and (
+                str(token.get("word", "")).startswith("##")
+                or sentence[start:end] in ("+", "#")
+            )
+        )
+
+        if same_word:
+            current_end = end
+            current_scores.append(score)
+            continue
+
+        # Continue multiword phrases when BERT uses the I label.
+        gap = sentence[current_end:start]
+
+        if label == "I" and start >= current_end and not gap.strip():
+            current_end = end
+            current_scores.append(score)
+            continue
+
+        # Otherwise, start a new entity.
+        save_span()
+        current_start = start
+        current_end = end
+        current_scores = [score]
+
+    save_span()
+    return results
+
+
 
 
 @lru_cache(maxsize=1)
@@ -180,35 +232,93 @@ def get_default_tagger() -> SpanTagger | None:
 # --------------------------------------------------------------- core pipeline
 
 
+
 def split_sentences(text: str) -> list[str]:
-    """Split text into bounded sentence fragments for skill extraction."""
+    """Split resume text into bounded chunks without discarding content."""
     pieces: list[str] = []
+    max_length = 400
+
     for line in text.splitlines():
         line = line.strip(" \t-*•·▪●–")
         if not line:
             continue
+
         for part in re.split(r"(?<=[.!?;])\s+(?=[A-Z0-9])", line):
             part = part.strip()
-            if len(part) > 1:
-                pieces.append(part[:600])
+            if len(part) <= 1:
+                continue
+
+            while len(part) > max_length:
+                # Prefer splitting at a space rather than inside a word.
+                split_at = part.rfind(" ", 0, max_length + 1)
+
+                if split_at <= 0:
+                    # Handle unusually long strings without spaces.
+                    split_at = max_length
+
+                chunk = part[:split_at].strip()
+                if chunk:
+                    pieces.append(chunk)
+
+                part = part[split_at:].strip()
+
+            if part:
+                pieces.append(part)
+
     return pieces
 
 
+
+
 def normalize_span(span: str, catalog: Catalog) -> str | None:
-    """Map a free-text skill phrase onto a catalog skill id."""
-    exact = catalog.resolve_alias(span)
+    """Map a BERT skill phrase to a catalog skill without unsafe partial matches."""
+
+    phrase = span.strip()
+    if not phrase:
+        return None
+
+    # 1. Prefer exact catalog matches.
+    exact = catalog.resolve_alias(phrase)
     if exact:
         return exact
-    match = catalog.alias_pattern.search(span)
-    if match:
-        return catalog.resolve_alias(match.group(0))
-    close = difflib.get_close_matches(
-        normalize_text(span),
-        list(catalog.alias_index),
-        n=1,
-        cutoff=FUZZY_CUTOFF,
+
+    # 2. Allow a known skill followed by a generic description.
+    # Example: "Python programming" -> "Python"
+    generic_suffixes = (
+        " programming",
+        " development",
+        " experience",
+        " skills",
+        " proficiency",
+        " knowledge",
+        " expertise",
     )
-    return catalog.alias_index[close[0]] if close else None
+
+    normalized = normalize_text(phrase)
+
+    for suffix in generic_suffixes:
+        if normalized.endswith(suffix):
+            base = normalized[:-len(suffix)].strip()
+            if base:
+                skill_id = catalog.resolve_alias(base)
+                if skill_id:
+                    return skill_id
+
+    # 3. Allow minor spelling variations, but not different technologies.
+    # Avoid fuzzy matching short names like SQL, Java, C++, or C#.
+    if len(normalized) >= 8:
+        close = difflib.get_close_matches(
+            normalized,
+            list(catalog.alias_index),
+            n=1,
+            cutoff=0.94,
+        )
+
+        if close:
+            return catalog.alias_index[close[0]]
+
+    # 4. Keep unknown skills unmapped for review.
+    return None
 
 
 def find_mentions(

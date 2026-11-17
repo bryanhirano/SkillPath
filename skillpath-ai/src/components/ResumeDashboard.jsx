@@ -1,18 +1,14 @@
-import { getFunctions, httpsCallable } from "firebase/functions";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { getDatabase, onValue, ref as dbRef } from "firebase/database";
+import { useEffect, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import { Link, useNavigate } from "react-router-dom";
-import {
-	analyzeResume,
-	extractResumeText,
-	identifyResumeSkills,
-} from "../backend/firebase.jsx";
+import { getSavedResumeDashboard } from "../backend/resumeDashboard.js";
 import { deleteCurrentResume } from "../backend/resumeStorage.js";
 import Loading from "./Loading.jsx";
 
 /**
- * Resume dashboard: runs extract_resume_text, identify_resume_skills and
- * analyze_resume together for the signed-in user and shows the results.
+ * Resume dashboard: reads saved analysis from Realtime Database. The first
+ * visit after a new resume runs a single callable and persists the results.
  * "Update resume" deletes the current resume before opening the upload page.
  */
 
@@ -30,37 +26,10 @@ const DEGREE_ORDER = [
 	"Bachelor's Degree",
 	"Associate Degree",
 ];
-const EMPTY_RESULTS = {
-	text: null,
-	skills: null,
-	analysis: null,
-	target: null,
-};
-
-// Saved target job + latest gap analysis (written by the Skills page).
-const loadTargetJob = () =>
-	httpsCallable(getFunctions(), "list_target_roles")()
-		.then(({ data }) => data)
-		.catch((err) => {
-			console.error("list_target_roles failed:", err);
-			throw new Error(
-				"Your target job couldn't be loaded. Press Refresh to try again.",
-			);
-		});
+const EMPTY_RESULTS = { text: null, skills: null, analysis: null, unmapped: [], model: null };
 
 const formatCategory = (category) =>
 	category ? category.charAt(0).toUpperCase() + category.slice(1) : "Other";
-
-// Turn one Promise.allSettled entry into { value, error }.
-const settle = (result, fallbackError) => {
-	if (result.status === "rejected") {
-		return { value: null, error: result.reason?.message || fallbackError };
-	}
-	if (result.value?.status !== "success") {
-		return { value: null, error: fallbackError };
-	}
-	return { value: result.value, error: "" };
-};
 
 const StatCard = ({ label, value, hint }) => (
 	<div className="col-6 col-lg-3">
@@ -94,10 +63,7 @@ const SkillEvidence = ({ name, evidence }) => {
 		const rect = anchor.current?.getBoundingClientRect();
 		if (!rect) return;
 		const width = Math.min(360, window.innerWidth - 16);
-		const left = Math.max(
-			8,
-			Math.min(rect.left, window.innerWidth - width - 8),
-		);
+		const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
 		// Below the name, or above it when there isn't room underneath.
 		const roomBelow = window.innerHeight - rect.bottom > 170;
 		setPos(
@@ -106,7 +72,7 @@ const SkillEvidence = ({ name, evidence }) => {
 				: { left, width, bottom: window.innerHeight - rect.top + 6 },
 		);
 	};
-	const close = useCallback(() => setPos(null), []);
+	const close = () => setPos(null);
 
 	// Close when the page scrolls or resizes, since the popup is fixed in place.
 	useEffect(() => {
@@ -117,7 +83,7 @@ const SkillEvidence = ({ name, evidence }) => {
 			window.removeEventListener("scroll", close, true);
 			window.removeEventListener("resize", close);
 		};
-	}, [pos, close]);
+	}, [pos]);
 
 	return (
 		<>
@@ -144,12 +110,7 @@ const SkillEvidence = ({ name, evidence }) => {
 				<div
 					role="tooltip"
 					className="bg-dark text-white rounded shadow p-2 small"
-					style={{
-						position: "fixed",
-						zIndex: 1080,
-						pointerEvents: "none",
-						...pos,
-					}}
+					style={{ position: "fixed", zIndex: 1080, pointerEvents: "none", ...pos }}
 				>
 					<div className="fw-semibold mb-1">Found in your resume</div>
 					{lines.length > 0 ? (
@@ -198,8 +159,8 @@ const TargetJobCard = ({ target, error }) => {
 					<SectionError message={error} />
 				) : !saved ? (
 					<p className="text-muted mb-0">
-						You haven't chosen a job to aim for yet. Pick one on the Skills page
-						to see how your skills compare.
+						You haven't chosen a job to aim for yet. Pick one on the Skills
+						page to see how your skills compare.
 					</p>
 				) : (
 					<>
@@ -240,7 +201,9 @@ const TargetJobCard = ({ target, error }) => {
 								</div>
 								{gaps.length > 0 ? (
 									<>
-										<div className="small text-muted mb-1">Skills to build</div>
+										<div className="small text-muted mb-1">
+											Skills to build
+										</div>
 										<ul className="list-unstyled mb-0">
 											{gaps.slice(0, 5).map((gap) => (
 												<li
@@ -275,8 +238,8 @@ const TargetJobCard = ({ target, error }) => {
 							</>
 						) : (
 							<p className="text-muted mb-0">
-								No comparison yet. Open the Skills page and press "Update target
-								job" to compare your skills with this job.
+								No comparison yet. Open the Skills page and press "Update
+								target job" to compare your skills with this job.
 							</p>
 						)}
 					</>
@@ -293,6 +256,9 @@ const ResumeDashboard = () => {
 	// Start in the loading state so the page never flashes "No results" before the first run.
 	const [loading, setLoading] = useState(true);
 	const [reloadCount, setReloadCount] = useState(0);
+	const [target, setTarget] = useState(null);
+	const [targetError, setTargetError] = useState("");
+	const [resultSource, setResultSource] = useState(null);
 	const navigate = useNavigate();
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const [deleting, setDeleting] = useState(false);
@@ -314,6 +280,43 @@ const ResumeDashboard = () => {
 		}
 	};
 
+	// Target selection and gap analysis already live in Realtime Database.
+	// Subscribe directly rather than calling list_target_roles each time.
+	useEffect(() => {
+		if (!uid) {
+			setTarget(null);
+			setTargetError("");
+			return;
+		}
+		const database = getDatabase();
+		let offAnalysis = () => {};
+		const offProfile = onValue(
+			dbRef(database, `users/${uid}/profile`),
+			(snapshot) => {
+				const profile = snapshot.val() ?? {};
+				offAnalysis();
+				setTargetError("");
+				if (!profile.latestAnalysisId) {
+					setTarget({ savedTarget: profile.target ?? null, latestAnalysis: null });
+					return;
+				}
+				offAnalysis = onValue(
+					dbRef(database, `users/${uid}/analyses/${profile.latestAnalysisId}`),
+					(latest) => setTarget({
+						savedTarget: profile.target ?? null,
+						latestAnalysis: latest.val(),
+					}),
+					(error) => setTargetError(error.message),
+				);
+			},
+			(error) => setTargetError(error.message),
+		);
+		return () => {
+			offProfile();
+			offAnalysis();
+		};
+	}, [uid]);
+
 	// biome-ignore lint/correctness/useExhaustiveDependencies: reloadCount intentionally triggers a reload.
 	useEffect(() => {
 		if (!uid) {
@@ -322,41 +325,29 @@ const ResumeDashboard = () => {
 			setLoading(false);
 			return;
 		}
-
 		let cancelled = false;
 		setLoading(true);
 		setErrors({});
-
-		Promise.allSettled([
-			extractResumeText(),
-			identifyResumeSkills(),
-			analyzeResume(),
-			loadTargetJob(),
-		]).then(([textResult, skillsResult, analysisResult, targetResult]) => {
-			if (cancelled) return;
-			const text = settle(textResult, "Resume text extraction failed.");
-			const skills = settle(skillsResult, "Skill identification failed.");
-			const analysis = settle(analysisResult, "Resume analysis failed.");
-			const target = settle(
-				targetResult,
-				"Your target job couldn't be loaded.",
-			);
-
-			setResults({
-				text: text.value,
-				skills: skills.value ? (skills.value.skills ?? []) : null,
-				analysis: analysis.value,
-				target: target.value,
+		getSavedResumeDashboard(uid, { force: reloadCount > 0 })
+			.then((snapshot) => {
+				if (cancelled) return;
+				setResults({
+					text: snapshot.text,
+					skills: snapshot.skills ?? [],
+					unmapped: snapshot.unmapped ?? [],
+					model: snapshot.model ?? null,
+					analysis: snapshot.analysis,
+				});
+				setResultSource(snapshot.source);
+			})
+			.catch((error) => {
+				if (cancelled) return;
+				setResults(EMPTY_RESULTS);
+				setErrors({ analysis: error?.message || "Resume analysis failed." });
+			})
+			.finally(() => {
+				if (!cancelled) setLoading(false);
 			});
-			setErrors({
-				text: text.error,
-				skills: skills.error,
-				analysis: analysis.error,
-				target: target.error,
-			});
-			setLoading(false);
-		});
-
 		return () => {
 			cancelled = true;
 		};
@@ -380,12 +371,10 @@ const ResumeDashboard = () => {
 		);
 	}
 
-	const { text, skills, analysis, target } = results;
+	const { text, skills, analysis } = results;
 	const nothingLoaded = !text && !skills && !analysis;
 	const advancedCount = skills?.filter((s) => s.level >= 4).length ?? 0;
-	const highestDegree = DEGREE_ORDER.find((degree) =>
-		analysis?.education?.includes(degree),
-	);
+
 
 	return (
 		<div className="container mt-4 mb-5">
@@ -414,10 +403,14 @@ const ResumeDashboard = () => {
 						onClick={() => setReloadCount((n) => n + 1)}
 						disabled={deleting}
 					>
-						Refresh
+						Reanalyze
 					</button>
 				</div>
 			</div>
+
+			{resultSource === "saved" && (
+				<p className="text-muted small">Loaded saved analysis from Realtime Database.</p>
+			)}
 
 			{confirmingDelete && (
 				<div
@@ -467,26 +460,10 @@ const ResumeDashboard = () => {
 				</>
 			) : (
 				<>
-					{/* Summary tiles */}
-					<div className="row g-3 mb-4">
-						<StatCard label="Skills identified" value={skills?.length ?? "—"} />
-						<StatCard
-							label="Advanced or expert"
-							value={skills ? advancedCount : "—"}
-							hint="estimated"
-						/>
-						<StatCard
-							label="Experience"
-							value={
-								analysis?.yearsExperience != null
-									? `${analysis.yearsExperience} yrs`
-									: "—"
-							}
-						/>
-						<StatCard label="Highest education" value={highestDegree ?? "—"} />
-					</div>
+			
+					
 
-					<TargetJobCard target={target} error={errors.target} />
+					<TargetJobCard target={target} error={targetError} />
 
 					{/* Skills */}
 					<div className="card shadow-sm mb-4">
@@ -494,7 +471,7 @@ const ResumeDashboard = () => {
 						<div className="card-body">
 							{errors.skills ? (
 								<SectionError message={errors.skills} />
-							) : skills.length === 0 ? (
+							) : (skills?.length ?? 0) === 0 ? (
 								<p className="text-muted mb-0">No skills identified.</p>
 							) : (
 								<>
@@ -550,55 +527,14 @@ const ResumeDashboard = () => {
 									</div>
 									<p className="text-muted small mt-3 mb-0">
 										Levels are estimated from how each skill is described in
-										your resume. Hover over or tap a skill to see where it was
-										found.
+										your resume. Hover over or tap a skill to see where it was found.
 									</p>
 								</>
 							)}
 						</div>
 					</div>
 
-					{/* Education and occupations */}
-					<div className="row g-3 mb-4">
-						<div className="col-md-6">
-							<div className="card shadow-sm h-100">
-								<div className="card-header">Education Mentioned</div>
-								<div className="card-body">
-									{errors.analysis ? (
-										<SectionError message={errors.analysis} />
-									) : analysis.education?.length > 0 ? (
-										<ul className="mb-0">
-											{analysis.education.map((degree) => (
-												<li key={degree}>{degree}</li>
-											))}
-										</ul>
-									) : (
-										<p className="text-muted mb-0">No degrees identified.</p>
-									)}
-								</div>
-							</div>
-						</div>
-						<div className="col-md-6">
-							<div className="card shadow-sm h-100">
-								<div className="card-header">Occupations Mentioned</div>
-								<div className="card-body">
-									{errors.analysis ? (
-										<SectionError message={errors.analysis} />
-									) : analysis.possibleOccupations?.length > 0 ? (
-										<ul className="mb-0">
-											{analysis.possibleOccupations.map((occupation) => (
-												<li key={occupation}>{occupation}</li>
-											))}
-										</ul>
-									) : (
-										<p className="text-muted mb-0">
-											No occupations identified.
-										</p>
-									)}
-								</div>
-							</div>
-						</div>
-					</div>
+				
 
 					{/* Extracted text */}
 					<div className="card shadow-sm">
@@ -618,7 +554,7 @@ const ResumeDashboard = () => {
 											overflowY: "auto",
 										}}
 									>
-										{text.text}
+										{text?.text}
 									</div>
 								</details>
 							)}

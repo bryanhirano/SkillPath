@@ -1,4 +1,4 @@
-import { ref as dbRef, getDatabase, remove } from "firebase/database";
+import { getDatabase, ref as dbRef, update } from "firebase/database";
 import { deleteObject, getStorage, ref as storageRef } from "firebase/storage";
 import "./firebase.jsx"; // makes sure the Firebase app is initialized
 
@@ -31,9 +31,13 @@ export const deleteResumeFile = async (uid) => {
 export const deleteCurrentResume = async (uid) => {
 	const db = getDatabase();
 	await deleteResumeFile(uid);
-	await Promise.all([
-		remove(dbRef(db, `users/${uid}/${RESUME_PATH_KEY}`)),
-		remove(dbRef(db, `users/${uid}/resumeText`)),
-		remove(dbRef(db, `users/${uid}/skillLevels`)),
-	]);
+	await update(dbRef(db, `users/${uid}`), {
+		[RESUME_PATH_KEY]: null,
+		resumeFileName: null,
+		resumeContentType: null,
+		resumeText: null,
+		resumeRevision: crypto.randomUUID(),
+		resumeAnalysis: null,
+		skillLevels: null,
+	});
 };

@@ -1,6 +1,7 @@
 """Authenticated Cloud Functions for resume text extraction."""
 
 import io
+import time
 import logging
 import re
 import zipfile
@@ -8,7 +9,7 @@ import zipfile
 from docx import Document
 from firebase_admin import db, initialize_app, storage
 from firebase_functions import https_fn
-from firebase_functions.options import set_global_options
+from firebase_functions.options import MemoryOption, set_global_options
 from google.api_core.exceptions import NotFound
 from pypdf import PdfReader
 
@@ -37,10 +38,8 @@ initialize_app(
     }
 )
 
-# Import after initialization to register these handlers with the configured app.
-# pylint: disable=wrong-import-position,unused-import
+# Imported after initialize_app() so these handlers share the configured app.
 from target_job import list_target_roles, select_target_role  # noqa: E402,F401
-# pylint: enable=wrong-import-position,unused-import
 
 
 def _resume_path(uid):
@@ -299,14 +298,22 @@ def extract_resume_text(request: https_fn.CallableRequest):
     }
 
 
-@https_fn.on_call()
+# Loads two BERT models (about 430 MB each), so it needs far more than the
+# default 256 MB. One request per instance keeps a single model copy per request.
+@https_fn.on_call(
+    memory=MemoryOption.GB_4,
+    cpu=2,
+    concurrency=1,
+    timeout_sec=300,
+)
 def identify_resume_skills(request: https_fn.CallableRequest):
     """Identify skills in the caller's resume using the SkillPath engine.
 
     The resume text is cleaned and capped by ``skillpath.text_extract`` and
-    then matched against the skill catalog in ``skillpath/data``. If the BERT
-    tagger is installed and enabled (``SKILLPATH_NER``), it adds skills the
-    catalog aliases miss; otherwise the taxonomy matcher runs alone.
+    then matched against the skill catalog in ``skillpath/data`` by name, alias
+    and phrase pattern. The JobBERT taggers then add skill phrases those miss.
+    If the models cannot be loaded (or ``SKILLPATH_NER=off``), the catalog
+    matcher runs alone and ``model`` is ``"taxonomy-only"``.
 
     Args:
         request: The Firebase callable request, including authentication data.
@@ -319,7 +326,9 @@ def identify_resume_skills(request: https_fn.CallableRequest):
         ``skillId``, ``name``, ``category``, ``level`` (0-5, the user's own
         value if they set one), ``estimatedLevel``, ``userSet``,
         ``levelReasons`` (how the estimate was made), ``evidence`` and
-        ``confidence``.
+        ``confidence``. Also ``unmapped``: up to 15 phrases the models tagged
+        as skills that are not in the catalog (``{text, count}``), and
+        ``model``: which tagger ran.
 
     Raises:
         https_fn.HttpsError: If the caller is unauthenticated, the resume is
@@ -331,27 +340,14 @@ def identify_resume_skills(request: https_fn.CallableRequest):
             message="Please sign in first.",
         )
 
-    _, resume_text = _load_resume_text(request.auth.uid)
-
-    try:
-        result = extract_skills(
-            clean_text(resume_text),
-            load_catalog(),
-            get_default_tagger(),
-        )
-    except Exception as error:
-        logging.exception("Skill extraction failed.")
-        raise https_fn.HttpsError(
-            code=https_fn.FunctionsErrorCode.INTERNAL,
-            message="Skill identification failed.",
-        ) from error
-
-    skills = apply_level_overrides(
-        result["skills"], _load_level_overrides(request.auth.uid)
-    )
+    snapshot, _ = _get_or_build_resume_dashboard(request.auth.uid)
     return {
         "status": "success",
-        "skills": skills,
+        "skills": apply_level_overrides(
+            snapshot["skills"], _load_level_overrides(request.auth.uid)
+        ),
+        "unmapped": snapshot.get("unmapped", []),
+        "model": snapshot.get("model", "taxonomy-only"),
     }
 
 
@@ -379,6 +375,11 @@ def analyze_resume(request: https_fn.CallableRequest):
         )
 
     file_name, resume_text = _load_resume_text(request.auth.uid)
+    return _analyze_resume_text(file_name, resume_text)
+
+
+def _analyze_resume_text(file_name: str, resume_text: str) -> dict:
+    """Run the existing rule-based analysis on already extracted text."""
     skills_catalog = {
         "Bookkeeping": ["bookkeeping", "bookkeeper"],
         "Accounting": ["accounting"],
@@ -466,4 +467,100 @@ def analyze_resume(request: https_fn.CallableRequest):
         "yearsExperience": years_experience,
         "possibleOccupations": possible_occupations,
         "skillsCount": len(identified_skills),
+    }
+
+
+# Increment this when the saved dashboard shape or extraction logic changes.
+DASHBOARD_CACHE_VERSION = 1
+
+
+def _resume_revision(uid: str) -> str:
+    """Resume version written by the upload UI; legacy resumes use a sentinel."""
+    revision = db.reference(f"users/{uid}/resumeRevision").get()
+    return revision if isinstance(revision, str) and revision else "legacy"
+
+
+def _get_or_build_resume_dashboard(uid: str, force: bool = False) -> tuple[dict, bool]:
+    """Read one user's cached analysis or build it once from their resume.
+
+    The cache contains model estimates, not user-edited levels, so overrides
+    remain current without rerunning BERT. Never trust a client-supplied UID.
+    """
+    revision = _resume_revision(uid)
+    cached_ref = db.reference(f"users/{uid}/resumeAnalysis")
+    cached = cached_ref.get()
+    if (
+        not force
+        and isinstance(cached, dict)
+        and cached.get("cacheVersion") == DASHBOARD_CACHE_VERSION
+        and cached.get("resumeRevision") == revision
+        and (cached.get("skills") is None or isinstance(cached.get("skills"), list))
+        and isinstance(cached.get("text"), dict)
+        and isinstance(cached.get("analysis"), dict)
+    ):
+        cached["skills"] = cached.get("skills") or []
+        return cached, True
+
+    file_name, resume_text = _load_resume_text(uid)
+    try:
+        extracted = extract_skills(
+            clean_text(resume_text), load_catalog(), get_default_tagger()
+        )
+    except Exception as error:
+        logging.exception("Skill extraction failed.")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message="Skill identification failed.",
+        ) from error
+
+    # Do not save results for an older resume if it changed during inference.
+    if _resume_revision(uid) != revision:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.ABORTED,
+            message="The resume changed during analysis. Please try again.",
+        )
+
+    snapshot = {
+        "cacheVersion": DASHBOARD_CACHE_VERSION,
+        "resumeRevision": revision,
+        "generatedAt": int(time.time() * 1000),
+        "text": {
+            "status": "success",
+            "fileName": file_name,
+            "text": resume_text,
+            "characterCount": len(resume_text),
+        },
+        "skills": extracted["skills"],  # raw estimates; user overrides applied on read
+        "unmapped": extracted.get("unmapped", []),
+        "model": extracted.get("model", "taxonomy-only"),
+        "analysis": _analyze_resume_text(file_name, resume_text),
+    }
+    cached_ref.set(snapshot)  # Admin SDK: only server can create this record.
+    return snapshot, False
+
+
+@https_fn.on_call(
+    memory=MemoryOption.GB_4,
+    cpu=2,
+    concurrency=1,
+    timeout_sec=300,
+)
+def get_resume_dashboard(request: https_fn.CallableRequest):
+    """Return persisted dashboard results; analyze only a new/changed resume."""
+    if request.auth is None:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
+            message="Please sign in first.",
+        )
+    data = request.data if isinstance(request.data, dict) else {}
+    snapshot, cached = _get_or_build_resume_dashboard(
+        request.auth.uid, force=data.get("force") is True
+    )
+    return {
+        "status": "success",
+        **snapshot,
+        "skills": apply_level_overrides(
+            snapshot["skills"], _load_level_overrides(request.auth.uid)
+        ),
+        "cached": cached,
     }

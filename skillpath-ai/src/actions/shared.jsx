@@ -16,15 +16,10 @@ export function handleInitialData(uid) {
 			.then((user) => {
 				if (stillLoggedIn()) dispatch(receiveUser(user));
 			})
-			.catch((error) =>
-				console.error("Could not load the user profile:", error),
-			);
-
+			
 		const appData = Promise.resolve()
 			.then(() => getInitialData(uid))
-			.catch((error) =>
-				console.error("Could not load spots and stats:", error),
-			);
+			
 
 		return Promise.all([profile, appData]).then(() => {
 			if (stillLoggedIn()) {

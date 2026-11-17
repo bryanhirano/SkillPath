@@ -1,11 +1,13 @@
 import { initializeApp } from "firebase/app";
 import {
 	browserSessionPersistence,
+	connectAuthEmulator,
 	createUserWithEmailAndPassword,
 	deleteUser,
 	GoogleAuthProvider,
 	getAdditionalUserInfo,
 	getAuth,
+	onAuthStateChanged,
 	sendPasswordResetEmail,
 	setPersistence,
 	signInWithEmailAndPassword,
@@ -13,9 +15,18 @@ import {
 	signOut,
 	updateProfile,
 } from "firebase/auth";
-import { child, get, getDatabase, ref, update } from "firebase/database";
-import { getFunctions, httpsCallable } from "firebase/functions";
 import {
+	child,
+	connectDatabaseEmulator,
+	get,
+	getDatabase,
+	onValue,
+	ref,
+	update,
+} from "firebase/database";
+import { connectFunctionsEmulator, getFunctions, httpsCallable } from "firebase/functions";
+import {
+	connectStorageEmulator,
 	deleteObject,
 	getStorage,
 	ref as storageRefs,
@@ -35,10 +46,18 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const data = getDatabase(app);
-const dbRef = ref(data);
 const storage = getStorage(app);
-export const auth = getAuth();
+export const auth = getAuth(app);
 const functions = getFunctions(app, "us-central1");
+
+// Use local services during development, never production services by accident.
+if (import.meta.env.DEV && import.meta.env.VITE_USE_FIREBASE_EMULATORS === "true") {
+	connectAuthEmulator(auth, "http://127.0.0.1:9099");
+	connectDatabaseEmulator(data, "127.0.0.1", 9000);
+	connectStorageEmulator(storage, "127.0.0.1", 9199);
+	connectFunctionsEmulator(functions, "127.0.0.1", 5001);
+}
+const dbRef = ref(data);
 
 const persistenceReady = setPersistence(auth, browserSessionPersistence).catch(
 	(error) => console.error("Could not set auth persistence:", error),
@@ -167,7 +186,6 @@ export function getInfo(parent) {
 				resolve(snapshot.val());
 			})
 			.catch((error) => {
-				console.error(error);
 				reject(error);
 			});
 	});
@@ -197,7 +215,7 @@ export async function uploadResume(uid, file) {
 		throw new Error("Resume must be smaller than 5 MB.");
 	}
 
-	const filePath = `resume/${uid}/`;
+	const filePath = `resume/${uid}`;
 	const storageRef = storageRefs(storage, filePath);
 	const metadata = {
 		contentType,
@@ -214,6 +232,8 @@ export async function uploadResume(uid, file) {
 			[`users/${uid}/resumeContentType`]: contentType,
 			// The newest resume wins: drop any typed resume so the functions read this file.
 			[`users/${uid}/resumeText`]: null,
+			[`users/${uid}/resumeRevision`]: crypto.randomUUID(),
+			[`users/${uid}/resumeAnalysis`]: null,
 		});
 	} catch (error) {
 		await deleteObject(snapshot.ref).catch((cleanupError) => {
@@ -240,14 +260,14 @@ export const _deleteUser = () => {
 			update(ref(data), updates);
 
 			deleteObject(uidImg).catch((error) => {
-				console.log(error);
+				
 			});
 
 			alert("Your account has been deleted");
 		})
 		.catch((error) => {
 			alert("Please log out, log in, and try again");
-			console.log(error);
+			
 		});
 };
 
@@ -266,6 +286,8 @@ export function saveResumeText(uid, text) {
 
 	const updates = {};
 	updates[`users/${uid}/resumeText`] = text;
+	updates[`users/${uid}/resumeRevision`] = crypto.randomUUID();
+	updates[`users/${uid}/resumeAnalysis`] = null;
 
 	return update(ref(data), updates);
 }
@@ -289,7 +311,7 @@ export async function identifyResumeSkills() {
 	}
 
 	await user.getIdToken();
-	const callable = httpsCallable(functions, "identify_resume_skills");
+	const callable = httpsCallable(functions, "identify_resume_skills", {timeout: 300000});
 	const result = await callable({});
 	return result.data;
 }
@@ -336,6 +358,7 @@ export async function userHasResumeUploaded() {
 	await user.getIdToken();
 
 	try {
+
 		const [pathSnapshot, textSnapshot] = await Promise.all([
 			get(child(dbRef, `users/${user.uid}/resumePath`)),
 			get(child(dbRef, `users/${user.uid}/resumeText`)),
@@ -350,6 +373,59 @@ export async function userHasResumeUploaded() {
 		console.error("Could not check for a saved resume:", error);
 		return false;
 	}
+}
+
+// NEW: watch whether the signed-in user has a resume (uploaded or typed).
+// onChange(hasResume) is called once with the current status and then only
+// when the status actually flips - after an upload, a typed save, a delete,
+// or a sign-in/sign-out. Nothing is called for re-renders or unrelated writes.
+// Returns a function that stops watching; return it from a useEffect.
+export function subscribeToResumeStatus(onChange) {
+	const isFilled = (value) => typeof value === "string" && value.trim() !== "";
+	let last;
+	const emit = (hasResume) => {
+		if (hasResume === last) return;
+		last = hasResume;
+		onChange(hasResume);
+	};
+
+	let stopData = () => {};
+	const stopAuth = onAuthStateChanged(auth, (user) => {
+		stopData();
+		stopData = () => {};
+		if (!user) {
+			emit(false);
+			return;
+		}
+
+		const values = {};
+		const watch = (key) =>
+			onValue(
+				ref(data, `users/${user.uid}/${key}`),
+				(snapshot) => {
+					values[key] = snapshot.val();
+					// Wait until both keys have loaded before reporting.
+					if ("resumePath" in values && "resumeText" in values) {
+						emit(isFilled(values.resumePath) || isFilled(values.resumeText));
+					}
+				},
+				(error) => {
+					console.error("Could not watch the saved resume:", error);
+					emit(false);
+				},
+			);
+		const stopPath = watch("resumePath");
+		const stopText = watch("resumeText");
+		stopData = () => {
+			stopPath();
+			stopText();
+		};
+	});
+
+	return () => {
+		stopAuth();
+		stopData();
+	};
 }
 
 // NEW: save the job the user chose and compare their skills with it.
