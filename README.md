@@ -1,4 +1,5 @@
 # SkillPath
+
 SkillPath is a career-development web application that enables users to assess their current skills, explore occupations, identify potential skill gaps, and plan learning pathways to achieve career objectives.
 
 ## Contents
@@ -31,21 +32,21 @@ Note: Steps 4–6 reflect the application's intended purpose and proposed workfl
 
 ## Technology stack
 
-| Layer | Technology | Purpose |
-| --- | --- | --- |
-| Frontend | React 19, React DOM | User interface |
-| Build tooling | Vite 8, @vitejs/plugin-react | Local development and production builds |
-| Navigation | React Router 7 | Client-side routing |
-| State management | Redux, Redux Toolkit, React Redux, Redux Thunk | Shared application state and asynchronous flows |
-| UI and styling | Bootstrap 5, React Bootstrap, Font Awesome | Responsive UI components and icons |
-| Additional UI utilities | React Easy Crop, React Loading | Image cropping and loading indicators |
-| Backend configuration | Firebase Cloud Functions (Python 3.13) | Server-side callable function runtime |
-| Data storage | Firebase Realtime Database | User-scoped text, analysis metadata, and progress |
-| File storage | Firebase Cloud Storage | Private uploaded resumes |
-| Authentication | Firebase Authentication | Required by database and storage security rules |
-| Quality tooling | Biome, Vitest | Linting/format checking and tests |
-| Occupational data | O*NET | Integration not verified in reviewed files |
-| Machine learning | Hugging Face | Models and integration not verified in reviewed files |
+| Layer                   | Technology                                     | Purpose                                               |
+| ----------------------- | ---------------------------------------------- | ----------------------------------------------------- |
+| Frontend                | React 19, React DOM                            | User interface                                        |
+| Build tooling           | Vite 8, @vitejs/plugin-react                   | Local development and production builds               |
+| Navigation              | React Router 7                                 | Client-side routing                                   |
+| State management        | Redux, Redux Toolkit, React Redux, Redux Thunk | Shared application state and asynchronous flows       |
+| UI and styling          | Bootstrap 5, React Bootstrap, Font Awesome     | Responsive UI components and icons                    |
+| Additional UI utilities | React Easy Crop, React Loading                 | Image cropping and loading indicators                 |
+| Backend configuration   | Firebase Cloud Functions (Python 3.13)         | Server-side callable function runtime                 |
+| Data storage            | Firebase Realtime Database                     | User-scoped text, analysis metadata, and progress     |
+| File storage            | Firebase Cloud Storage                         | Private uploaded resumes                              |
+| Authentication          | Firebase Authentication                        | Required by database and storage security rules       |
+| Quality tooling         | Biome, Vitest                                  | Linting/format checking and tests                     |
+| Occupational data       | O*NET                                          | Integration not verified in reviewed files            |
+| Machine learning        | Hugging Face                                   | Models and integration not verified in reviewed files |
 
 ## Architecture and data flow
 
@@ -82,6 +83,7 @@ resumes/{uid}/{fileName}
 ```
 
 Rules enforce the following restrictions:
+
 - The user must be authenticated and their UID must match the path.
 - Uploads must be strictly smaller than 5 * 1024 * 1024 bytes.
 - Allowed MIME types are application/pdf, text/plain, and the standard DOCX MIME type.
@@ -123,16 +125,16 @@ This is a description of paths referenced by rules, not proof that every field i
 
 The rules deny access by default at the database root. At /users/{uid}, reads require an authenticated user with a matching UID. Client writes are restricted by path:
 
-| Path | Client write access |
-| --- | --- |
-| profile | Denied |
-| analyses | Denied |
-| resumePath | Owner only; must begin with resumes/{uid}/ and be at most 512 characters |
-| resumeFileName | Owner only; at most 255 characters |
-| resumeContentType | Owner only; must equal the PDF or DOCX MIME type |
-| resumeText | Owner only; at most 100,000 characters |
-| progress/{analysisId} | Owner only, and only if the referenced analysis exists |
-| Other user fields | Denied |
+| Path                  | Client write access                                                      |
+| --------------------- | ------------------------------------------------------------------------ |
+| profile               | Denied                                                                   |
+| analyses              | Denied                                                                   |
+| resumePath            | Owner only; must begin with resumes/{uid}/ and be at most 512 characters |
+| resumeFileName        | Owner only; at most 255 characters                                       |
+| resumeContentType     | Owner only; must equal the PDF or DOCX MIME type                         |
+| resumeText            | Owner only; at most 100,000 characters                                   |
+| progress/{analysisId} | Owner only, and only if the referenced analysis exists                   |
+| Other user fields     | Denied                                                                   |
 
 Progress values must be numeric and not exceed the server’s current time. Note: The database allows only PDF or DOCX MIME values in resumeContentType, whereas Storage also accepts text/plain. These rules should be aligned with the intended frontend behavior prior to supporting plain-text file uploads.
 
@@ -197,13 +199,13 @@ Review the selected Firebase project and ensure that the missing functions/ dire
 
 ## Development commands
 
-| Command | Description |
-| --- | --- |
-| `npm run dev` | Start the Vite development server |
-| `npm run build` | Build the frontend with Vite |
+| Command           | Description                           |
+| ----------------- | ------------------------------------- |
+| `npm run dev`     | Start the Vite development server     |
+| `npm run build`   | Build the frontend with Vite          |
 | `npm run preview` | Preview the production frontend build |
-| `npm run lint` | Run biome ci |
-| `npm test` | Run the Vitest test suite once |
+| `npm run lint`    | Run biome ci                          |
+| `npm test`        | Run the Vitest test suite once        |
 
 Biome is configured with recommended linting rules, tab indentation, double quotes for JavaScript, and organized imports.
 
