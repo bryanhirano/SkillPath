@@ -125,7 +125,7 @@ const TargetJobPicker = ({
 				)}
 
 				<form onSubmit={handleSubmit}>
-					<fieldset className="btn-group mb-3" aria-label="Target type">
+					<div className="btn-group mb-3">
 						<input
 							type="radio"
 							className="btn-check"
@@ -140,7 +140,7 @@ const TargetJobPicker = ({
 						>
 							Choose a job
 						</label>
-					</fieldset>
+					</div>
 
 					<div className="mb-3">
 						<label htmlFor="target-role" className="form-label">

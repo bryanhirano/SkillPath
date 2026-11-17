@@ -1,10 +1,10 @@
-
 """Tests for education extraction."""
 
 from skillpath.education import extract_education
 
 
 def test_expected_bachelors():
+    """Verify extraction of a bachelor's degree with an expected graduation date."""
     text = (
         "Bachelor of Science in Computer Science, "
         "University of Maryland, Expected December 2026"
@@ -19,6 +19,7 @@ def test_expected_bachelors():
 
 
 def test_masters_degree():
+    """Verify extraction of a master's degree with a graduation year."""
     text = "Master of Science in Data Analytics, 2022"
     records = extract_education(text)
 
@@ -30,11 +31,13 @@ def test_masters_degree():
 
 
 def test_no_degree():
+    """Verify text without education credentials returns an empty list."""
     text = "Experienced with Python, SQL, and project management."
-    assert extract_education(text) == []
+    assert not extract_education(text)
 
 
 def test_multiple_degrees():
+    """Verify extraction of multiple degrees from separate lines."""
     text = (
         "Bachelor of Science in Computer Science, 2020\n"
         "Master of Science in Cybersecurity, Expected 2027"
@@ -48,6 +51,7 @@ def test_multiple_degrees():
 
 
 def test_multiline_education():
+    """Verify extraction of a multiline education block with institution and date."""
     resume = """
 EDUCATION
 University of Maryland Global Campus
@@ -68,6 +72,7 @@ Python, Java, SQL
 
 
 def test_two_degrees_without_blank_lines():
+    """Verify consecutive degree entries without blank lines are parsed separately."""
     resume = """
 EDUCATION
 University of Maryland
@@ -96,6 +101,7 @@ Software Developer
 
 
 def test_microsoft_products_are_not_degrees():
+    """Verify MS product names in skills sections are not mistaken for MS degrees."""
     resume = """
 TECHNICAL SKILLS
 Databases: MS Access, SQL Server
@@ -115,6 +121,7 @@ Bachelor of Science in Computer Science, August 2016
 
 
 def test_ignore_degrees_outside_education():
+    """Verify degree mentions in summary or experience sections are ignored."""
     resume = """
 PROFESSIONAL SUMMARY
 Mentored employees pursuing master's degrees.
@@ -136,6 +143,7 @@ University of Maryland
 
 
 def test_university_and_expected_date_before_degree():
+    """Verify institution and expected graduation on the same line are parsed."""
     resume = """
 EDUCATION
 UNIVERSITY OF MARYLAND GLOBAL CAMPUS    Expected Graduation: Dec 2026

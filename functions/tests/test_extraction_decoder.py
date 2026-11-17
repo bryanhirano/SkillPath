@@ -1,10 +1,10 @@
-
 """Regression tests for JobBERT token decoding."""
 
 from skillpath.extraction import decode_bio
 
 
 def make_token(word, label, start, end):
+    """Build a mock token dictionary for BIO decoding tests."""
     return {
         "word": word,
         "entity": label,
@@ -15,6 +15,7 @@ def make_token(word, label, start, end):
 
 
 def test_sql():
+    """Verify subword tokens for SQL merge into a single entity."""
     tokens = [
         make_token("S", "B", 0, 1),
         make_token("##QL", "B", 1, 3),
@@ -23,6 +24,7 @@ def test_sql():
 
 
 def test_mysql():
+    """Verify multiple subword tokens for MySQL merge into a single entity."""
     tokens = [
         make_token("My", "B", 0, 2),
         make_token("##S", "B", 2, 3),
@@ -32,6 +34,7 @@ def test_mysql():
 
 
 def test_cpp():
+    """Verify adjacent symbol tokens for C++ merge without spaces."""
     tokens = [
         make_token("C", "B", 0, 1),
         make_token("+", "B", 1, 2),
@@ -41,6 +44,7 @@ def test_cpp():
 
 
 def test_multiword_phrase():
+    """Verify B and I tokens separated by a space form a multiword phrase."""
     tokens = [
         make_token("Python", "B", 0, 6),
         make_token("applications", "I", 7, 19),
@@ -49,6 +53,7 @@ def test_multiword_phrase():
 
 
 def test_separate_entities():
+    """Verify separate B tokens with non-adjacent offsets stay distinct."""
     tokens = [
         make_token("Python", "B", 0, 6),
         make_token("Java", "B", 11, 15),

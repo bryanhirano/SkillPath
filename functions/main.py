@@ -1,9 +1,9 @@
 """Authenticated Cloud Functions for resume text extraction."""
 
 import io
-import time
 import logging
 import re
+import time
 import zipfile
 
 from docx import Document
@@ -39,7 +39,10 @@ initialize_app(
 )
 
 # Imported after initialize_app() so these handlers share the configured app.
-from target_job import list_target_roles, select_target_role  # noqa: E402,F401
+from target_job import (  # noqa: E402,F401 # pylint: disable=wrong-import-position,unused-import
+    list_target_roles,
+    select_target_role,
+)
 
 
 def _resume_path(uid):
@@ -367,7 +370,8 @@ def analyze_resume(request: https_fn.CallableRequest):
 
     Raises:
         https_fn.HttpsError: If the caller is unauthenticated or the resume
-            file or extracted text is invalid. """
+            file or extracted text is invalid.
+    """
     if request.auth is None:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
@@ -480,6 +484,23 @@ def _resume_revision(uid: str) -> str:
     return revision if isinstance(revision, str) and revision else "legacy"
 
 
+def _is_valid_cache(cached, revision: str) -> bool:
+    """Return whether cached dashboard data matches the current schema and revision."""
+    if not isinstance(cached, dict):
+        return False
+    if (
+        cached.get("cacheVersion") != DASHBOARD_CACHE_VERSION
+        or cached.get("resumeRevision") != revision
+    ):
+        return False
+    skills = cached.get("skills")
+    return (
+        (skills is None or isinstance(skills, list))
+        and isinstance(cached.get("text"), dict)
+        and isinstance(cached.get("analysis"), dict)
+    )
+
+
 def _get_or_build_resume_dashboard(uid: str, force: bool = False) -> tuple[dict, bool]:
     """Read one user's cached analysis or build it once from their resume.
 
@@ -489,15 +510,7 @@ def _get_or_build_resume_dashboard(uid: str, force: bool = False) -> tuple[dict,
     revision = _resume_revision(uid)
     cached_ref = db.reference(f"users/{uid}/resumeAnalysis")
     cached = cached_ref.get()
-    if (
-        not force
-        and isinstance(cached, dict)
-        and cached.get("cacheVersion") == DASHBOARD_CACHE_VERSION
-        and cached.get("resumeRevision") == revision
-        and (cached.get("skills") is None or isinstance(cached.get("skills"), list))
-        and isinstance(cached.get("text"), dict)
-        and isinstance(cached.get("analysis"), dict)
-    ):
+    if not force and _is_valid_cache(cached, revision):
         cached["skills"] = cached.get("skills") or []
         return cached, True
 

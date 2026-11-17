@@ -157,7 +157,7 @@ def decode_bio(sentence: str, tokens: list[dict]) -> list[tuple[str, float]]:
         if start is None or end is None:
             continue
 
-        if not (0 <= start < end <= len(sentence)):
+        if not 0 <= start < end <= len(sentence):
             continue
 
         if label not in ("B", "I"):

@@ -1,4 +1,3 @@
-
 """Tests for the Firebase resume-analysis response."""
 
 from types import SimpleNamespace
@@ -8,6 +7,7 @@ import main
 
 
 def test_analyze_resume_returns_education_details():
+    """Verify that analyze_resume extracts education details from resume text."""
     resume_text = """
 EDUCATION
 Bachelor of Science in Computer Science
